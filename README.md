@@ -148,6 +148,10 @@ Selected: [PROJECT-7760] Lorem ipsum dolor sit amet, consectetur adipiscing elit
 Action: (c)omment, update (s)tatus, (o)pen in browser, (b)ack to list, (q)uit: 
 ```
 
+> [!NOTE]
+> Jira Data Center comments do **not** support Markdown or HTML formatting via the REST
+> API. Links and formatting will appear as plain text.
+
 ---
 
 ## JASPER Attribution in Comments
@@ -161,10 +165,6 @@ Comment added via JASPER: https://github.com/redhat-performance/JASPER
 
 You can disable this globally by setting `jasper_attribution: false` in your
 `config.yaml` or by passing the `--no-jasper-attribution` flag on the command line.
-
-> [!NOTE]
-> Jira Data Center comments do **not** support Markdown or HTML formatting via the REST
-> API. Links and formatting will appear as plain text.
 
 ---
 
