@@ -48,6 +48,24 @@ jasper_attribution: true
 
 ---
 
+## Example Usage
+
+To run JASPER with the `config.yaml` file in your current directory:
+
+```sh
+python3 jasper.py
+```
+
+Or, to specify all options on the command line:
+
+```sh
+python3 jasper.py --jira-url "https://your-company.atlassian.net" \
+  --usernames user1 user2 \
+  --board-ids 10 25 42
+```
+
+---
+
 ## JASPER Attribution in Comments
 
 By default, JASPER will append the following plain text attribution to each comment it
@@ -60,9 +78,9 @@ Comment added via JASPER: https://github.com/redhat-performance/JASPER
 You can disable this globally by setting `jasper_attribution: false` in your
 `config.yaml` or by passing the `--no-jasper-attribution` flag on the command line.
 
-**Note:**  
-Jira Data Center comments do **not** support Markdown or HTML formatting via the REST
-API. Links and formatting will appear as plain text.
+> [!NOTE]
+> Jira Data Center comments do **not** support Markdown or HTML formatting via the REST
+> API. Links and formatting will appear as plain text.
 
 ---
 
