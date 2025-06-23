@@ -7,6 +7,28 @@ tokens are stored securely using the system keyring.
 
 ---
 
+## Python Requirements
+
+JASPER requires Python 3.7 or newer.
+
+You can install all dependencies using pip.
+
+Optional: Create a virtual environment:
+
+```sh
+python3 -m venv venv
+source venv/bin/activate
+```
+
+Install the dependencies via the provided [requirements.txt](requirements.txt) file:
+
+```sh
+python3 -m ensurepip
+python3 -m pip install -r requirements.txt
+```
+
+---
+
 ## Configuration
 
 Create a `config.yaml` file in the same directory as `jasper.py` (or specify with
