@@ -102,3 +102,14 @@ your system keyring. The keyring entry is scoped to your Jira instance and a fix
       `https://your-jira.example.com/secure/RapidBoard.jspa?rapidView={BOARD_ID}`.
     - The `BOARD_ID` is the number after `rapidView=` in the URL.
     - If unsure, ask your Jira administrator or check the board settings in Jira.
+
+---
+
+## License
+
+Apache License, Version 2.0. See the [LICENSE](LICENSE) file for details.
+
+---
+
+For more information, see
+[https://github.com/redhat-performance/JASPER](https://github.com/redhat-performance/JASPER)
