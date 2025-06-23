@@ -21,10 +21,9 @@ usernames:
   - "user1"
   - "user2"
 
-# (Optional) A list of board IDs to search within.
+# A list of board IDs to search within.
 # To find board IDs: In Jira, open your board in the browser. The board ID is the
 # number in the URL after "rapidView=" (e.g., ...RapidBoard.jspa?rapidView=42).
-# If this is commented out or removed, the script will check all boards.
 board_ids:
   - 10
   - 25

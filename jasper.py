@@ -41,18 +41,20 @@ DEFAULT_ATTRIBUTION = True
 # --- Jira API Functions ---
 
 
-def get_active_sprints(base_url, api_token, board_ids=None):
+def get_active_sprints(base_url, api_token, board_ids):
     """
-    Fetches active sprints from specified boards or all accessible boards.
+    Fetches active sprints from specified boards.
 
     Args:
         base_url (str): The base URL of the Jira instance.
         api_token (str): The API token for authentication.
-        board_ids (list[int], optional): List of Jira board IDs to check.
+        board_ids (list[int]): List of Jira board IDs to check.
 
     Returns:
         list[int]: A list of active sprint IDs, or an empty list on failure.
     """
+    if not board_ids:
+        raise ValueError("board_ids is required for get_active_sprints()")
     active_sprint_ids = []
     boards_to_check = []
     headers = {
@@ -60,22 +62,8 @@ def get_active_sprints(base_url, api_token, board_ids=None):
         "Accept": "application/json",
     }
 
-    if board_ids:
-        print(f"Checking specified board IDs: {board_ids}")
-        boards_to_check = [{"id": board_id} for board_id in board_ids]
-    else:
-        print("No specific board IDs provided. Checking all accessible boards...")
-        board_url = f"{base_url}/rest/agile/1.0/board"
-        try:
-            board_response = requests.get(board_url, headers=headers, timeout=30)
-            board_response.raise_for_status()
-            boards_to_check = board_response.json().get("values", [])
-            if not boards_to_check:
-                print("Warning: No boards found. Ensure permissions are correct.")
-                return []
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching boards list: {e}", file=sys.stderr)
-            return []
+    print(f"Checking specified board IDs: {board_ids}")
+    boards_to_check = [{"id": board_id} for board_id in board_ids]
 
     print(f"Found {len(boards_to_check)} boards. Looking for active sprints...")
 
@@ -564,6 +552,8 @@ def main():
         missing.append("'jira_url'")
     if not usernames:
         missing.append("'usernames'")
+    if not board_ids:
+        missing.append("'board_ids'")
     if missing:
         print(
             f"Error: Missing required configuration: {', '.join(missing)}",
