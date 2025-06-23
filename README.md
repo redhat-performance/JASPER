@@ -104,6 +104,12 @@ your system keyring. The keyring entry is scoped to your Jira instance and a fix
 
 ---
 
+## AI Notes
+
+This project was developed with the assistance of Gemini 2.5 Pro and Copilot/GPT-4.1.
+
+---
+
 ## License
 
 Apache License, Version 2.0. See the [LICENSE](LICENSE) file for details.
