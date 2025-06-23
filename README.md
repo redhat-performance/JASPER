@@ -48,7 +48,7 @@ jasper_attribution: true
 
 ---
 
-## Example Usage
+## Usage
 
 To run JASPER with the `config.yaml` file in your current directory:
 
@@ -62,6 +62,68 @@ Or, to specify all options on the command line:
 python3 jasper.py --jira-url "https://your-company.atlassian.net" \
   --usernames user1 user2 \
   --board-ids 10 25 42
+```
+
+After starting JASPER, you will see a numbered list of your active sprint issues.
+
+You can interact with the tool using the following options:
+
+- **Select an issue:**  
+  Enter the number of an issue to select it for further actions.
+
+- **(r)efresh the issue list:**  
+  Enter `r` or `refresh` to reload the list of issues.
+
+- **(q)uit:**  
+  Enter `q` or `quit` to exit the program.
+
+```console
+API token found in secure storage.
+API authentication successful.
+Checking specified board IDs: [12345]
+Found 1 boards. Looking for active sprints...
+
+Found 1 active sprints.
+
+Querying for issues with JQL:
+  > assignee in ("foo@example.com", "bar@example.com") AND sprint in (7890) ORDER BY updated DESC
+
+--- Active Sprint Items ---
+  1: [PROJECT-7760] Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed accumsan porta sem. (Status: In Progress, Priority: Normal) (Assignee: bar@example.com)
+      URL: https://your-company.atlassian.net/browse/PROJECT-7760
+  2: [PROJECT-29981] Phasellus malesuada aliquet lacus a pharetra. Aliquam erat volutpat. (Status: In Progress, Priority: Critical) (Assignee: foo@example.com)
+      URL: https://your-company.atlassian.net/browse/PROJECT-29981
+  3: [PROJECT-27400] Etiam turpis lacus, vestibulum ac mauris et, pellentesque bibendum ante. (Status: New, Priority: Major) (Assignee: foo@example.com)
+      URL: https://your-company.atlassian.net/browse/PROJECT-27400
+  4: [PROJECT-30477] Suspendisse egestas risus id ligula facilisis pharetra. (Status: In Progress, Priority: Undefined) (Assignee: bar@example.com)
+      URL: https://your-company.atlassian.net/browse/PROJECT-30477
+---------------------------
+
+Enter an issue number to select, (r)efresh, or (q)uit: 
+```
+
+When you select an issue, you will be prompted with additional actions:
+
+- **(c)omment:**  
+  Add a comment to the selected issue. You can enter a multi-line comment, ending with
+  a new line and Ctrl+D (Linux/macOS) or Ctrl+Z then Enter (Windows).
+
+- **Update (s)tatus:**  
+  Change the status of the selected issue. You will be shown available transitions and
+  can select one by number.
+
+- **(o)pen in browser:**  
+  Open the selected issue in your default web browser.
+
+- **(b)ack to list:**  
+  Return to the main issue list.
+
+- **(q)uit:**  
+  Exit the program from the issue action menu.
+
+```console
+Selected: [PROJECT-7760] Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed accumsan porta sem.
+Action: (c)omment, update (s)tatus, (o)pen in browser, (b)ack to list, (q)uit: 
 ```
 
 ---
