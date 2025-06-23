@@ -35,13 +35,14 @@ import requests
 import yaml
 import keyring
 import keyring.errors
+import time
 
 DEFAULT_ATTRIBUTION = True
 
 # --- Jira API Functions ---
 
 
-def get_active_sprints(base_url, api_token, board_ids):
+def get_active_sprints(base_url, api_token, board_ids, max_retries=3, retry_delay=2):
     """
     Fetches active sprints from specified boards.
 
@@ -49,6 +50,8 @@ def get_active_sprints(base_url, api_token, board_ids):
         base_url (str): The base URL of the Jira instance.
         api_token (str): The API token for authentication.
         board_ids (list[int]): List of Jira board IDs to check.
+        max_retries (int): Number of retries for transient errors.
+        retry_delay (int): Delay in seconds between retries.
 
     Returns:
         list[int]: A list of active sprint IDs, or an empty list on failure.
@@ -69,24 +72,44 @@ def get_active_sprints(base_url, api_token, board_ids):
 
     # Iterate through the boards and find sprints with the state "active".
     for board in boards_to_check:
-        try:
-            sprint_url = (
-                f"{base_url}/rest/agile/1.0/board/{board['id']}/sprint?state=active"
-            )
-            sprint_response = requests.get(sprint_url, headers=headers, timeout=30)
-            sprint_response.raise_for_status()
-            sprints = sprint_response.json().get("values", [])
-            for sprint in sprints:
-                if sprint.get("id") not in active_sprint_ids:
-                    active_sprint_ids.append(sprint["id"])
-        except requests.exceptions.RequestException as e:
-            # A single failing board should not stop the entire script.
-            print(
-                f"Warning: Could not fetch sprints for board ID {board['id']}. "
-                f"Error: {e}",
-                file=sys.stderr,
-            )
-            continue
+        attempt = 0
+        while attempt < max_retries:
+            try:
+                sprint_url = (
+                    f"{base_url}/rest/agile/1.0/board/{board['id']}/sprint?state=active"
+                )
+                sprint_response = requests.get(sprint_url, headers=headers, timeout=30)
+                if sprint_response.status_code == 429:
+                    retry_after = int(sprint_response.headers.get("Retry-After", retry_delay))
+                    print(
+                        f"Rate limited by Jira API (HTTP 429). Retrying after {retry_after}s...",
+                        file=sys.stderr,
+                    )
+                    time.sleep(retry_after)
+                    attempt += 1
+                    continue
+                sprint_response.raise_for_status()
+                sprints = sprint_response.json().get("values", [])
+                for sprint in sprints:
+                    if sprint.get("id") not in active_sprint_ids:
+                        active_sprint_ids.append(sprint["id"])
+                break  # Success, exit retry loop
+            except requests.exceptions.RequestException as e:
+                attempt += 1
+                if attempt < max_retries:
+                    print(
+                        f"Warning: Could not fetch sprints for board ID {board['id']} "
+                        f"(attempt {attempt}/{max_retries}). Retrying in {retry_delay}s. "
+                        f"Error: {e}",
+                        file=sys.stderr,
+                    )
+                    time.sleep(retry_delay)
+                else:
+                    print(
+                        f"Warning: Could not fetch sprints for board ID {board['id']} after "
+                        f"{max_retries} attempts. Error: {e}",
+                        file=sys.stderr,
+                    )
     return active_sprint_ids
 
 
