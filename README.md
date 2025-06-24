@@ -7,7 +7,7 @@ tokens are stored securely using the system keyring.
 
 ---
 
-## Python Requirements
+## Installation
 
 JASPER requires Python 3.7 or newer.
 
@@ -24,7 +24,7 @@ Once installed, you can run JASPER from anywhere using the Python module syntax:
 python3 -m jasper
 ```
 
-Or simply as:
+Or (depending on your system configuration) simply as:
 
 ```sh
 jasper
@@ -73,6 +73,32 @@ jasper_attribution: true
 
 ---
 
+## Authentication & API Token Storage
+
+JASPER uses a Jira API token for authentication. The token is stored securely using
+your system keyring. The keyring entry is scoped to your Jira instance and a fixed key
+("jasper"), so only one token per Jira instance is stored.
+
+You can add your Jira API token to the keyring securely once, and it will be available
+for all future runs of JASPER.
+
+```sh
+jasper --set-token
+```
+
+- If, when running JASPER, no token is found in the keyring, you will be prompted to
+  enter one.
+- You will also be asked if you want to store the token in your keyring for future use.
+
+> [!NOTE]
+> To create a Jira API token, go to your Jira Data Center profile and look for
+> "Personal Access Tokens" under your profile or account settings.  
+> For example, visit:  
+> `https://your-jira.example.com/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens`  
+> If you do not see this option, contact your Jira administrator.
+
+---
+
 ## Usage
 
 By default, JASPER will look for a `jasper_config.yaml` file in your current directory.
@@ -90,6 +116,12 @@ jasper --jira-url "https://your-company.atlassian.net" \
   --usernames user1 user2 \
   --board-ids 10 25 42
 ```
+
+> [!TIP]
+> If you have installed JASPER as a module, have placed your configuration file in your
+> home directory, and have set up your Jira key in the keyring, you can simply run
+> `jasper` at the command line with no flags at any time to get the latest open sprint
+> issues for the configured users and boards.
 
 After starting JASPER, you will see a numbered list of your active sprint issues.
 
@@ -170,24 +202,6 @@ Comment added via JASPER: https://github.com/redhat-performance/JASPER
 
 You can disable this globally by setting `jasper_attribution: false` in your
 `config.yaml` or by passing the `--no-jasper-attribution` flag on the command line.
-
----
-
-## Authentication & API Token Storage
-
-JASPER uses a Jira API token for authentication. The token is stored securely using
-your system keyring. The keyring entry is scoped to your Jira instance and a fixed key
-("jasper"), so only one token per Jira instance is stored.
-
-- If no token is found in the keyring, you will be prompted to enter one.
-- You will be asked if you want to store the token in your keyring for future use.
-
-> [!NOTE]
-> To create a Jira API token, go to your Jira Data Center profile and look for
-> "Personal Access Tokens" under your profile or account settings.  
-> For example, visit:  
-> `https://your-jira.example.com/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens`  
-> If you do not see this option, contact your Jira administrator.
 
 ---
 
