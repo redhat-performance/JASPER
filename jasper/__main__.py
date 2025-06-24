@@ -710,8 +710,12 @@ def main():
                     print("\nAvailable Statuses:")
 
                     def closed_last(transitions):
-                        closed = [t for t in transitions if t['name'].lower() == 'closed']
-                        not_closed = [t for t in transitions if t['name'].lower() != 'closed']
+                        closed = [
+                            t for t in transitions if t["name"].lower() == "closed"
+                        ]
+                        not_closed = [
+                            t for t in transitions if t["name"].lower() != "closed"
+                        ]
                         return not_closed + closed
 
                     transitions_sorted = closed_last(transitions)
@@ -720,7 +724,8 @@ def main():
 
                     while True:
                         trans_choice = input(
-                            "\nEnter the number of the status to change to, or (b)ack, or (q)uit: "
+                            "\nEnter the number of the status to change to, or (b)ack, "
+                            "or (q)uit: "
                         ).lower()
                         if trans_choice in ("b", "back"):
                             break
