@@ -683,8 +683,8 @@ def main():
                 ).lower()
 
                 if action in ("b", "back"):
-                    display_issues(issues)  # Re-display the list when going back
-                    break  # Breaks from the action sub-loop back to the main list
+                    display_issues(issues)
+                    break
 
                 elif action in ("o", "open"):
                     issue_url = f"{jira_url.rstrip('/')}/browse/{issue_key}"
@@ -708,35 +708,54 @@ def main():
                         continue
 
                     print("\nAvailable Statuses:")
-                    for i, t in enumerate(transitions):
+
+                    def closed_last(transitions):
+                        closed = [t for t in transitions if t['name'].lower() == 'closed']
+                        not_closed = [t for t in transitions if t['name'].lower() != 'closed']
+                        return not_closed + closed
+
+                    transitions_sorted = closed_last(transitions)
+                    for i, t in enumerate(transitions_sorted):
                         print(f"  {i+1}: {t['name']}")
 
-                    trans_choice = input(
-                        "Enter the number of the status to change to, or (b)ack: "
-                    ).lower()
-                    if trans_choice in ("b", "back"):
-                        continue
+                    while True:
+                        trans_choice = input(
+                            "\nEnter the number of the status to change to, or (b)ack, or (q)uit: "
+                        ).lower()
+                        if trans_choice in ("b", "back"):
+                            break
+                        if trans_choice in ("q", "quit"):
+                            print("\nExiting.")
+                            sys.exit(0)
+                        if not trans_choice.strip():
+                            # Empty input: re-display the list of available statuses
+                            for i, t in enumerate(transitions_sorted):
+                                print(f"  {i+1}: {t['name']}")
+                            continue
 
-                    try:
-                        trans_index = int(trans_choice) - 1
-                        if 0 <= trans_index < len(transitions):
-                            transition_id = transitions[trans_index]["id"]
-                            # If status changes, break back to main list
-                            if set_issue_transition(
-                                jira_url, api_token, issue_key, transition_id
-                            ):
-                                print("Status updated. Refresh to see changes.")
-                                break
-                        else:
-                            print("Invalid transition number.")
-                    except ValueError:
-                        print("Invalid input.")
+                        try:
+                            trans_index = int(trans_choice) - 1
+                            if 0 <= trans_index < len(transitions_sorted):
+                                transition_id = transitions_sorted[trans_index]["id"]
+                                if set_issue_transition(
+                                    jira_url, api_token, issue_key, transition_id
+                                ):
+                                    print("\nStatus updated. Refresh to see changes.")
+                                    # Stay in the issue action sub-loop
+                            else:
+                                print("Invalid transition number.")
+                                for i, t in enumerate(transitions_sorted):
+                                    print(f"  {i+1}: {t['name']}")
+                        except ValueError:
+                            print("Invalid input.")
+                            for i, t in enumerate(transitions_sorted):
+                                print(f"  {i+1}: {t['name']}")
+
                 elif action in ("q", "quit"):
                     print("\nExiting.")
                     sys.exit(0)
                 else:
                     print("Invalid action. Please choose from the options.")
-
         except ValueError:
             print("Invalid input. Please enter a number, 'r', or 'q'.")
         except (EOFError, KeyboardInterrupt):
