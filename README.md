@@ -11,28 +11,31 @@ tokens are stored securely using the system keyring.
 
 JASPER requires Python 3.7 or newer.
 
-You can install all dependencies using pip.
-
-Optional: Create a virtual environment:
-
-```sh
-python3 -m venv venv
-source venv/bin/activate
-```
-
-Install the dependencies via the provided [requirements.txt](requirements.txt) file:
+To install JASPER as a module, run the following commands from the project root:
 
 ```sh
 python3 -m ensurepip
-python3 -m pip install -r requirements.txt
+pip install .
+```
+
+Once installed, you can run JASPER from anywhere using the Python module syntax:
+
+```sh
+python3 -m jasper
+```
+
+Or simply as:
+
+```sh
+jasper
 ```
 
 ---
 
 ## Configuration
 
-Create a `config.yaml` file in the same directory as `jasper.py` (or specify with
-`--config`). Example:
+Create a `jasper_config.yaml` file in your current directory or in your user home
+directory (or you can specify a file location with `--config`). Example:
 
 ```yaml
 # Your full Jira instance URL
@@ -59,7 +62,7 @@ jasper_attribution: true
 
 ## Command-Line Arguments
 
-- `--config`: Path to the YAML config file (default: `config.yaml`)
+- `--config`: Path to the YAML config file (default: `jasper_config.yaml`)
 - `--jira-url`: Your Jira instance URL (overrides config)
 - `--usernames`: One or more Jira usernames/account IDs to query for assigned issues
   (overrides config)
@@ -72,16 +75,18 @@ jasper_attribution: true
 
 ## Usage
 
-To run JASPER with the `config.yaml` file in your current directory:
+By default, JASPER will look for a `jasper_config.yaml` file in your current directory.
+If not found, it will look in your home directory. You can also specify a config file
+explicitly:
 
 ```sh
-python3 jasper.py
+jasper --config /path/to/jasper_config.yaml
 ```
 
-Or, to specify all options on the command line:
+Or, to specify options on the command line (these will override config file options):
 
 ```sh
-python3 jasper.py --jira-url "https://your-company.atlassian.net" \
+jasper --jira-url "https://your-company.atlassian.net" \
   --usernames user1 user2 \
   --board-ids 10 25 42
 ```

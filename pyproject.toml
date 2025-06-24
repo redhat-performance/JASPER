@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jasper-jira"
+version = "0.1.0b1"
+description = "Jira Active Sprint Personal Reporter"
+authors = [
+    { name = "Dustin Black", email = "dblack@redhat.com" }
+]
+license = { file = "LICENSE" }
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = [
+    "requests",
+    "PyYAML",
+    "keyring"
+]
+
+[project.urls]
+Homepage = "https://github.com/redhat-performance/JASPER"
+
+[project.scripts]
+jasper = "jasper.__main__:main"

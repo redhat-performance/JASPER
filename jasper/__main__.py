@@ -31,11 +31,11 @@ import getpass
 import sys
 import os
 import webbrowser
+import time
 import requests
 import yaml
 import keyring
 import keyring.errors
-import time
 
 DEFAULT_ATTRIBUTION = True
 
@@ -80,9 +80,12 @@ def get_active_sprints(base_url, api_token, board_ids, max_retries=3, retry_dela
                 )
                 sprint_response = requests.get(sprint_url, headers=headers, timeout=30)
                 if sprint_response.status_code == 429:
-                    retry_after = int(sprint_response.headers.get("Retry-After", retry_delay))
+                    retry_after = int(
+                        sprint_response.headers.get("Retry-After", retry_delay)
+                    )
                     print(
-                        f"Rate limited by Jira API (HTTP 429). Retrying after {retry_after}s...",
+                        "Rate limited by Jira API (HTTP 429). "
+                        f"Retrying after {retry_after}s...",
                         file=sys.stderr,
                     )
                     time.sleep(retry_after)
@@ -99,15 +102,16 @@ def get_active_sprints(base_url, api_token, board_ids, max_retries=3, retry_dela
                 if attempt < max_retries:
                     print(
                         f"Warning: Could not fetch sprints for board ID {board['id']} "
-                        f"(attempt {attempt}/{max_retries}). Retrying in {retry_delay}s. "
+                        f"(attempt {attempt}/{max_retries}). "
+                        f"Retrying in {retry_delay}s. "
                         f"Error: {e}",
                         file=sys.stderr,
                     )
                     time.sleep(retry_delay)
                 else:
                     print(
-                        f"Warning: Could not fetch sprints for board ID {board['id']} after "
-                        f"{max_retries} attempts. Error: {e}",
+                        f"Warning: Could not fetch sprints for board ID {board['id']} "
+                        f"after {max_retries} attempts. Error: {e}",
                         file=sys.stderr,
                     )
     return active_sprint_ids
@@ -342,19 +346,27 @@ def load_config(config_path):
         config_path (str): The path to the YAML configuration file.
 
     Returns:
-        dict or None: The loaded configuration dictionary, or None if an error occurs.
+        tuple: (config_dict or None, path or None)
     """
-    if not os.path.exists(config_path):
-        return None
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f)
-    except (yaml.YAMLError, IOError) as e:
-        print(
-            f"Error reading or parsing config file {config_path}: {e}",
-            file=sys.stderr,
-        )
-        return None
+    # Try the provided path, then fallback to $HOME/jasper_config.yaml if not found
+    search_paths = [config_path]
+    if not os.path.isabs(config_path):
+        home_path = os.path.join(os.path.expanduser("~"), "jasper_config.yaml")
+        if home_path not in search_paths:
+            search_paths.append(home_path)
+    for path in search_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    config = yaml.safe_load(f)
+                return config, path
+            except (yaml.YAMLError, IOError) as e:
+                print(
+                    f"Error reading or parsing config file {path}: {e}",
+                    file=sys.stderr,
+                )
+                return None, None
+    return None, None
 
 
 def check_jira_auth(jira_url, api_token):
@@ -525,8 +537,9 @@ def main():
     # Define command-line arguments for configuration and actions.
     parser.add_argument(
         "--config",
-        default="config.yaml",
-        help="Path to the YAML config file (default: config.yaml)",
+        default="jasper_config.yaml",
+        help="Path to the YAML config file (default: jasper_config.yaml, "
+        "or $HOME/jasper_config.yaml)",
     )
     parser.add_argument(
         "--jira-url",
@@ -559,13 +572,22 @@ def main():
     )
 
     args = parser.parse_args()
-    config = load_config(args.config) or {}
+    config, config_path_used = load_config(args.config)
+    if config is None:
+        config = {}
+
+    if config_path_used:
+        print(f"Loaded configuration from: {config_path_used}")
+    else:
+        print("No configuration file found. Using command-line arguments only.")
 
     # Prioritize command-line args over config file values.
     jira_url = args.jira_url or config.get("jira_url")
     # Read usernames from config if available, otherwise from command line
     usernames = args.usernames or config.get("usernames")
-    if isinstance(usernames, str):
+    if usernames is None:
+        usernames = []
+    elif isinstance(usernames, str):
         usernames = [usernames]
     board_ids = args.board_ids or config.get("board_ids")
 
@@ -582,7 +604,10 @@ def main():
             f"Error: Missing required configuration: {', '.join(missing)}",
             file=sys.stderr,
         )
-        print("Provide these as command-line arguments or in your config.yaml file.")
+        print(
+            "Provide these as command-line arguments or in your "
+            "jasper_config.yaml file."
+        )
         parser.print_help()
         sys.exit(1)
 
