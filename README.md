@@ -60,6 +60,26 @@ jasper_attribution: true
 
 ---
 
+### Finding Your Jira Information
+
+- **Jira Username or Account ID (`usernames`)**:
+    - For Jira Data Center, this is typically your Jira login username (not necessarily 
+      your email).
+    - You can find your username by clicking your profile/avatar in the top right and
+      selecting "Profile" or "Profile and Visibility."
+    - Your username is often shown in the URL or in your profile details.
+    - If unsure, ask your Jira administrator or check the "Assigned to" field on an
+      issue you are assigned to.
+
+- **Jira Board ID (`board_ids`)**:
+    - Navigate to the Jira board you are interested in.
+    - The URL will be similar to
+      `https://your-jira.example.com/secure/RapidBoard.jspa?rapidView={BOARD_ID}`.
+    - The `BOARD_ID` is the number after `rapidView=` in the URL.
+    - If unsure, ask your Jira administrator or check the board settings in Jira.
+
+---
+
 ## Command-Line Arguments
 
 - `--config`: Path to the YAML config file (default: `jasper_config.yaml`)
@@ -202,26 +222,6 @@ Comment added via JASPER: https://github.com/redhat-performance/JASPER
 
 You can disable this globally by setting `jasper_attribution: false` in your
 `config.yaml` or by passing the `--no-jasper-attribution` flag on the command line.
-
----
-
-## Finding Your Jira Information
-
-- **Jira Username or Account ID (`usernames`)**:
-    - For Jira Data Center, this is typically your Jira login username (not necessarily 
-      your email).
-    - You can find your username by clicking your profile/avatar in the top right and
-      selecting "Profile" or "Profile and Visibility."
-    - Your username is often shown in the URL or in your profile details.
-    - If unsure, ask your Jira administrator or check the "Assigned to" field on an
-      issue you are assigned to.
-
-- **Jira Board ID (`board_ids`)**:
-    - Navigate to the Jira board you are interested in.
-    - The URL will be similar to
-      `https://your-jira.example.com/secure/RapidBoard.jspa?rapidView={BOARD_ID}`.
-    - The `BOARD_ID` is the number after `rapidView=` in the URL.
-    - If unsure, ask your Jira administrator or check the board settings in Jira.
 
 ---
 
