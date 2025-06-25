@@ -426,7 +426,7 @@ class TestJasperMain(unittest.TestCase):
         mock_config.return_value = (
             {
                 "jira_url": self.fake_jira_url,
-                "usernames": ["dblack"],
+                "usernames": ["example_user"],
                 "board_ids": self.fake_board_ids,
             },
             "c.yaml",
@@ -463,6 +463,111 @@ class TestJasperMain(unittest.TestCase):
 
         # Verify that the correct error message was printed to stderr.
         self.assertIn("Error loading configuration", mock_stderr.getvalue())
+
+    @patch("argparse.ArgumentParser.parse_args")
+    @patch("jasper.__main__.load_config")
+    @patch("jasper.__main__.get_api_token_with_auth_check", return_value="fake-token")
+    @patch("jasper.__main__.get_active_sprints", return_value=[100])
+    @patch("jasper.__main__.get_user_issues_in_sprints")
+    @patch("jasper.__main__.get_issue_transitions")
+    @patch("jasper.__main__.set_issue_transition")
+    @patch("builtins.input", side_effect=["1", "s", "1", "q"])
+    @patch("sys.exit")
+    def test_main_action_update_status_success(
+        self,
+        mock_exit,
+        mock_input,
+        mock_set_transition,
+        mock_get_transitions,
+        mock_get_issues,
+        mock_sprints,
+        mock_token,
+        mock_config,
+        mock_args,
+    ):
+        """Test the main loop for a successful status update."""
+        # Make the mock for sys.exit raise a SystemExit exception, which is
+        # its normal behavior. This prevents the test from crashing with a
+        # StopIteration error on the input mock.
+        mock_exit.side_effect = SystemExit(0)
+
+        mock_args.return_value = MagicMock(
+            config="c.yaml",
+            jira_url=None,
+            usernames=None,
+            board_ids=None,
+            set_token=False,
+            no_jasper_attribution=False,
+        )
+        mock_config.return_value = (
+            {
+                "jira_url": self.fake_jira_url,
+                "usernames": ["dblack"],
+                "board_ids": self.fake_board_ids,
+            },
+            "c.yaml",
+        )
+        mock_get_issues.return_value = self.mock_issue_list
+        mock_get_transitions.return_value = [{"id": "24", "name": "Done"}]
+        mock_set_transition.return_value = True
+
+        # The main function should now raise a SystemExit, which we catch.
+        with self.assertRaises(SystemExit) as cm:
+            jasper_main.main()
+
+        # Check that the exit code is 0, indicating a clean exit.
+        self.assertEqual(cm.exception.code, 0)
+
+        mock_get_transitions.assert_called_with(
+            self.fake_jira_url, "fake-token", "PROJ-123"
+        )
+        mock_set_transition.assert_called_with(
+            self.fake_jira_url, "fake-token", "PROJ-123", "24"
+        )
+        # Verify that our mocked sys.exit was called with the correct code.
+        mock_exit.assert_called_with(0)
+
+    @patch("argparse.ArgumentParser.parse_args")
+    @patch("jasper.__main__.load_config")
+    @patch("jasper.__main__.get_api_token_with_auth_check", return_value="fake-token")
+    @patch("jasper.__main__.get_active_sprints", return_value=[100])
+    @patch("jasper.__main__.get_user_issues_in_sprints")
+    @patch("jasper.__main__.get_issue_transitions", return_value=[])
+    @patch("sys.stdout", new_callable=io.StringIO)
+    @patch("builtins.input", side_effect=["1", "s", "b", "q"])
+    def test_main_action_update_status_no_transitions(
+        self,
+        mock_input,
+        mock_stdout,
+        mock_get_transitions,
+        mock_get_issues,
+        mock_sprints,
+        mock_token,
+        mock_config,
+        mock_args,
+    ):
+        """Test the status update flow when no transitions are available."""
+        mock_args.return_value = MagicMock(
+            config="c.yaml",
+            jira_url=None,
+            usernames=None,
+            board_ids=None,
+            set_token=False,
+            no_jasper_attribution=False,
+        )
+        mock_config.return_value = (
+            {
+                "jira_url": self.fake_jira_url,
+                "usernames": ["example_user"],
+                "board_ids": self.fake_board_ids,
+            },
+            "c.yaml",
+        )
+        mock_get_issues.return_value = self.mock_issue_list
+
+        jasper_main.main()
+
+        self.assertIn("No available status transitions", mock_stdout.getvalue())
 
 
 if __name__ == "__main__":
