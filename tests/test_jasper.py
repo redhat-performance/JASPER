@@ -45,8 +45,7 @@ class TestJasperMain(unittest.TestCase):
         self.assertEqual(sprints, [42])
 
     @patch("jasper.__main__.requests.get")
-    @patch("time.sleep")
-    def test_get_active_sprints_rate_limit(self, mock_sleep, mock_get):
+    def test_get_active_sprints_rate_limit(self, mock_get):
         """
         Test get_active_sprints handles HTTP 429 rate limiting and retries.
         """
@@ -57,11 +56,12 @@ class TestJasperMain(unittest.TestCase):
         resp_200 = MagicMock()
         resp_200.status_code = 200
         resp_200.json.return_value = {"values": [{"id": 99}]}
-        mock_get.side_effect = [resp_429, resp_200]
+        # Provide enough responses for each board in fake_board_ids
+        mock_get.side_effect = [resp_429, resp_200, resp_429, resp_200]
         sprints = jasper_main.get_active_sprints(
             self.fake_jira_url, self.fake_api_token, self.fake_board_ids
         )
-        self.assertEqual(sprints, [99])
+        self.assertEqual(sprints, [99, 99])
 
     @patch("jasper.__main__.requests.post")
     def test_add_comment_to_issue_success(self, mock_post):
@@ -134,7 +134,7 @@ class TestJasperMain(unittest.TestCase):
         """
         config_content = "jira_url: https://jira.example.com\n"
         test_filename = "jasper_config.yaml"
-        with open(test_filename, "w") as f:
+        with open(test_filename, "w", encoding="utf-8") as f:
             f.write(config_content)
         try:
             config, path = jasper_main.load_config(test_filename)
