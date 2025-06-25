@@ -576,8 +576,9 @@ class TestJasperMain(unittest.TestCase):
     @patch("jasper.__main__.keyring.set_password")
     @patch("sys.exit")
     @patch("argparse.ArgumentParser.parse_args")
+    @patch("jasper.__main__.load_config")
     def test_main_set_token_flow(
-        self, mock_args, mock_exit, mock_set_password, mock_getpass
+        self, mock_load_config, mock_args, mock_exit, mock_set_password, mock_getpass
     ):
         """Test the --set-token command-line argument flow."""
         mock_args.return_value = MagicMock(
@@ -588,6 +589,9 @@ class TestJasperMain(unittest.TestCase):
             set_token=True,  # Simulate --set-token flag
             no_jasper_attribution=False,
         )
+        # We need to return a valid config, even if it's empty,
+        # to prevent the main() function from exiting early.
+        mock_load_config.return_value = ({}, "mock_path.yaml")
 
         # Configure the mock to raise SystemExit, just like the real sys.exit()
         mock_exit.side_effect = SystemExit(0)
