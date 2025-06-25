@@ -14,8 +14,9 @@ import unittest
 from unittest.mock import patch, MagicMock
 import os
 import requests
-import yaml
 import json
+import io
+import yaml
 
 import jasper.__main__ as jasper_main
 
@@ -33,6 +34,19 @@ class TestJasperMain(unittest.TestCase):
         self.fake_api_token = "fake-token"
         self.fake_board_ids = [1, 2]
         self.fake_issue_key = "PROJ-123"
+        self.mock_issue_list = [
+            {
+                "key": "PROJ-123",
+                "self": "https://jira.example.com/rest/api/2/issue/PROJ-123",
+                "fields": {
+                    "summary": "This is a test issue.",
+                    "status": {"name": "In Progress"},
+                    "priority": {"name": "High"},
+                    "assignee": {"name": "example_user"},
+                },
+                "_jasper_assignee": "example_user",
+            }
+        ]
 
     @patch("jasper.__main__.keyring")
     @patch("jasper.__main__.requests.get")
@@ -296,6 +310,159 @@ class TestJasperMain(unittest.TestCase):
         self.assertEqual(len(issues), 1)
         sent_payload = json.loads(mock_post.call_args.kwargs["data"])
         self.assertIn('assignee = "user1"', sent_payload["jql"])
+
+    # --- main() Function Tests ---
+
+    @patch("argparse.ArgumentParser.parse_args")
+    @patch("jasper.__main__.load_config")
+    @patch("jasper.__main__.get_api_token_with_auth_check", return_value="fake-token")
+    @patch("jasper.__main__.get_active_sprints", return_value=[100])
+    @patch("jasper.__main__.get_user_issues_in_sprints")
+    @patch("sys.stdout", new_callable=io.StringIO)
+    @patch("builtins.input", side_effect=["q"])
+    def test_main_happy_path_quit(
+        self,
+        mock_input,
+        mock_stdout,
+        mock_get_issues,
+        mock_sprints,
+        mock_token,
+        mock_config,
+        mock_args,
+    ):
+        """Test main runs, displays issues, and quits."""
+        mock_args.return_value = MagicMock(
+            config="c.yaml",
+            jira_url=None,
+            usernames=None,
+            board_ids=None,
+            set_token=False,
+            no_jasper_attribution=False,
+        )
+        mock_config.return_value = (
+            {
+                "jira_url": self.fake_jira_url,
+                "usernames": ["example_user"],
+                "board_ids": self.fake_board_ids,
+            },
+            "c.yaml",
+        )
+        mock_get_issues.return_value = self.mock_issue_list
+
+        jasper_main.main()
+
+        self.assertIn("PROJ-123", mock_stdout.getvalue())
+        self.assertIn("This is a test issue", mock_stdout.getvalue())
+        mock_input.assert_called_once()
+
+    @patch("argparse.ArgumentParser.parse_args")
+    @patch("jasper.__main__.load_config")
+    @patch("jasper.__main__.get_api_token_with_auth_check", return_value="fake-token")
+    @patch("jasper.__main__.get_active_sprints", return_value=[100])
+    @patch("jasper.__main__.get_user_issues_in_sprints")
+    @patch("jasper.__main__.webbrowser.open_new_tab")
+    @patch("builtins.input", side_effect=["1", "o", "b", "q"])
+    def test_main_action_open_in_browser(
+        self,
+        mock_input,
+        mock_webbrowser,
+        mock_get_issues,
+        mock_sprints,
+        mock_token,
+        mock_config,
+        mock_args,
+    ):
+        """Test main loop selecting an issue and opening it."""
+        mock_args.return_value = MagicMock(
+            config="c.yaml",
+            jira_url=None,
+            usernames=None,
+            board_ids=None,
+            set_token=False,
+            no_jasper_attribution=False,
+        )
+        mock_config.return_value = (
+            {
+                "jira_url": self.fake_jira_url,
+                "usernames": ["example_user"],
+                "board_ids": self.fake_board_ids,
+            },
+            "c.yaml",
+        )
+        mock_get_issues.return_value = self.mock_issue_list
+
+        jasper_main.main()
+
+        mock_webbrowser.assert_called_with(f"{self.fake_jira_url}/browse/PROJ-123")
+
+    @patch("argparse.ArgumentParser.parse_args")
+    @patch("jasper.__main__.load_config")
+    @patch("jasper.__main__.get_api_token_with_auth_check", return_value="fake-token")
+    @patch("jasper.__main__.get_active_sprints", return_value=[100])
+    @patch("jasper.__main__.get_user_issues_in_sprints")
+    @patch("jasper.__main__.add_comment_to_issue")
+    @patch("jasper.__main__.get_multiline_comment", return_value="Test comment")
+    @patch("builtins.input", side_effect=["1", "c", "b", "q"])
+    def test_main_action_add_comment(
+        self,
+        mock_input,
+        mock_get_comment,
+        mock_add_comment,
+        mock_get_issues,
+        mock_sprints,
+        mock_token,
+        mock_config,
+        mock_args,
+    ):
+        """Test main loop selecting an issue and adding a comment."""
+        mock_args.return_value = MagicMock(
+            config="c.yaml",
+            jira_url=None,
+            usernames=None,
+            board_ids=None,
+            set_token=False,
+            no_jasper_attribution=False,
+        )
+        mock_config.return_value = (
+            {
+                "jira_url": self.fake_jira_url,
+                "usernames": ["dblack"],
+                "board_ids": self.fake_board_ids,
+            },
+            "c.yaml",
+        )
+        mock_get_issues.return_value = self.mock_issue_list
+
+        jasper_main.main()
+
+        mock_add_comment.assert_called()
+        # Check that attribution was added to the comment body
+        self.assertIn("JASPER", mock_add_comment.call_args[0][3])
+
+    @patch("argparse.ArgumentParser.parse_args")
+    @patch(
+        "jasper.__main__.load_config", side_effect=FileNotFoundError("Config not found")
+    )
+    @patch("sys.stderr", new_callable=io.StringIO)
+    @patch("sys.exit")
+    def test_main_config_load_error(
+        self, mock_exit, mock_stderr, mock_config, mock_args
+    ):
+        """Test main exits gracefully if config file cannot be loaded."""
+        mock_args.return_value = MagicMock(config="nonexistent.yaml")
+
+        # Let the mocked sys.exit raise the actual SystemExit exception
+        # to correctly halt execution flow inside main().
+        mock_exit.side_effect = SystemExit(1)
+
+        with self.assertRaises(SystemExit) as cm:
+            jasper_main.main()
+
+        # Check that the exit code is correct
+        self.assertEqual(cm.exception.code, 1)
+
+        # Verify that the correct error message was printed to stderr.
+        self.assertIn("Error loading configuration", mock_stderr.getvalue())
 
 
 if __name__ == "__main__":
