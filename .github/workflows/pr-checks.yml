@@ -47,10 +47,10 @@ jobs:
 
       - name: Add coverage summary to GitHub summary
         run: |
-          coverage report > coverage.txt
-          cat coverage.txt
           echo '### Coverage Report' >> $GITHUB_STEP_SUMMARY
-          cat coverage.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          coverage report >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Check if version was updated
         id: version_check
