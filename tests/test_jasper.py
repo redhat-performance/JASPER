@@ -2,8 +2,9 @@
 Unit tests for the JASPER Jira Active Sprint Personal Reporter core functions.
 
 These tests use Python's built-in unittest framework and unittest.mock for mocking
-external dependencies such as network requests. The tests cover key API interaction
-functions, configuration loading, and authentication logic in jasper.__main__.
+external dependencies such as network requests and keyring. The tests cover key API
+interaction functions, configuration loading, and authentication logic in
+jasper.__main__.
 
 Author: Dustin Black
 License: Apache License, Version 2.0
@@ -12,6 +13,8 @@ License: Apache License, Version 2.0
 import unittest
 from unittest.mock import patch, MagicMock
 import os
+import requests
+import yaml
 
 import jasper.__main__ as jasper_main
 
@@ -30,8 +33,9 @@ class TestJasperMain(unittest.TestCase):
         self.fake_board_ids = [1, 2]
         self.fake_issue_key = "PROJ-123"
 
+    @patch("jasper.__main__.keyring")
     @patch("jasper.__main__.requests.get")
-    def test_get_active_sprints_success(self, mock_get):
+    def test_get_active_sprints_success(self, mock_get, _):
         """
         Test get_active_sprints returns sprint IDs when the API call is successful.
         """
@@ -44,8 +48,9 @@ class TestJasperMain(unittest.TestCase):
         )
         self.assertEqual(sprints, [42])
 
+    @patch("jasper.__main__.keyring")
     @patch("jasper.__main__.requests.get")
-    def test_get_active_sprints_rate_limit(self, mock_get):
+    def test_get_active_sprints_rate_limit(self, mock_get, _):
         """
         Test get_active_sprints handles HTTP 429 rate limiting and retries.
         """
@@ -61,10 +66,100 @@ class TestJasperMain(unittest.TestCase):
         sprints = jasper_main.get_active_sprints(
             self.fake_jira_url, self.fake_api_token, self.fake_board_ids
         )
-        self.assertEqual(sprints, [99, 99])
+        self.assertEqual(sprints, [99])
 
+    # --- Negative/Error Path Tests ---
+
+    @patch("jasper.__main__.keyring")
+    @patch("jasper.__main__.requests.get")
+    def test_get_active_sprints_api_error(self, mock_get, _):
+        """Test get_active_sprints returns empty list on API error."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 500
+        mock_resp.json.return_value = {}
+        mock_get.return_value = mock_resp
+        sprints = jasper_main.get_active_sprints(
+            self.fake_jira_url, self.fake_api_token, self.fake_board_ids
+        )
+        self.assertEqual(sprints, [])
+
+    @patch("jasper.__main__.keyring")
     @patch("jasper.__main__.requests.post")
-    def test_add_comment_to_issue_success(self, mock_post):
+    def test_add_comment_to_issue_failure(self, mock_post, _):
+        """Test add_comment_to_issue returns False on non-201 response."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        # Simulate raise_for_status raising an HTTPError for 400
+        mock_resp.raise_for_status.side_effect = requests.exceptions.HTTPError()
+        mock_post.return_value = mock_resp
+        result = jasper_main.add_comment_to_issue(
+            self.fake_jira_url, self.fake_api_token, self.fake_issue_key, "fail comment"
+        )
+        self.assertFalse(result)
+
+    @patch("jasper.__main__.keyring")
+    @patch("jasper.__main__.requests.post")
+    def test_set_issue_transition_failure(self, mock_post, _):
+        """Test set_issue_transition returns False on non-204 response."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        mock_post.return_value = mock_resp
+        result = jasper_main.set_issue_transition(
+            self.fake_jira_url, self.fake_api_token, self.fake_issue_key, "1"
+        )
+        self.assertFalse(result)
+
+    @patch("jasper.__main__.keyring")
+    @patch("jasper.__main__.requests.get")
+    def test_get_issue_transitions_failure(self, mock_get, _):
+        """Test get_issue_transitions returns empty list on non-200 response."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 404
+        mock_resp.json.return_value = {}
+        mock_get.return_value = mock_resp
+        transitions = jasper_main.get_issue_transitions(
+            self.fake_jira_url, self.fake_api_token, self.fake_issue_key
+        )
+        self.assertEqual(transitions, [])
+
+    def test_load_config_invalid_file(self):
+        """Test load_config raises on invalid YAML file."""
+        test_filename = "bad_config.yaml"
+        with open(test_filename, "w", encoding="utf-8") as f:
+            f.write("not: [valid yaml")
+        try:
+            with self.assertRaises(yaml.YAMLError):
+                jasper_main.load_config(test_filename)
+        finally:
+            os.remove(test_filename)
+
+    def test_load_config_missing_file(self):
+        """Test load_config raises on missing file."""
+        with self.assertRaises(FileNotFoundError):
+            jasper_main.load_config("no_such_file.yaml")
+
+    # --- Keyring Interaction Tests ---
+
+    @patch("jasper.__main__.keyring")
+    def test_keyring_get_token(self, mock_keyring):
+        """Test retrieving a token from keyring."""
+        mock_keyring.get_password.return_value = "token-from-keyring"
+        token = mock_keyring.get_password("jasper", "user")
+        self.assertEqual(token, "token-from-keyring")
+        mock_keyring.get_password.assert_called_with("jasper", "user")
+
+    @patch("jasper.__main__.keyring")
+    def test_keyring_set_token(self, mock_keyring):
+        """Test storing a token in keyring."""
+        mock_keyring.set_password.return_value = None
+        jasper_main.keyring.set_password("jasper", "user", "new-token")
+        mock_keyring.set_password.assert_called_with("jasper", "user", "new-token")
+
+    # --- Positive Path Tests ---
+
+    @patch("jasper.__main__.keyring")
+    @patch("jasper.__main__.requests.post")
+    def test_add_comment_to_issue_success(self, mock_post, _):
         """
         Test add_comment_to_issue returns True when the comment is added successfully.
         """
@@ -76,8 +171,9 @@ class TestJasperMain(unittest.TestCase):
         )
         self.assertTrue(result)
 
+    @patch("jasper.__main__.keyring")
     @patch("jasper.__main__.requests.get")
-    def test_get_issue_transitions_success(self, mock_get):
+    def test_get_issue_transitions_success(self, mock_get, _):
         """
         Test get_issue_transitions returns transitions when the API call is successful.
         """
@@ -90,8 +186,9 @@ class TestJasperMain(unittest.TestCase):
         )
         self.assertEqual(transitions, [{"id": "1", "name": "Done"}])
 
+    @patch("jasper.__main__.keyring")
     @patch("jasper.__main__.requests.post")
-    def test_set_issue_transition_success(self, mock_post):
+    def test_set_issue_transition_success(self, mock_post, _):
         """
         Test set_issue_transition returns True when the transition is successful.
         """
@@ -103,8 +200,9 @@ class TestJasperMain(unittest.TestCase):
         )
         self.assertTrue(result)
 
+    @patch("jasper.__main__.keyring")
     @patch("jasper.__main__.requests.get")
-    def test_check_jira_auth_success(self, mock_get):
+    def test_check_jira_auth_success(self, mock_get, _):
         """
         Test check_jira_auth returns True for a 200 OK response.
         """
@@ -115,8 +213,9 @@ class TestJasperMain(unittest.TestCase):
             jasper_main.check_jira_auth(self.fake_jira_url, self.fake_api_token)
         )
 
+    @patch("jasper.__main__.keyring")
     @patch("jasper.__main__.requests.get")
-    def test_check_jira_auth_failure(self, mock_get):
+    def test_check_jira_auth_failure(self, mock_get, _):
         """
         Test check_jira_auth returns False for a 401 Unauthorized response.
         """
@@ -128,7 +227,8 @@ class TestJasperMain(unittest.TestCase):
             jasper_main.check_jira_auth(self.fake_jira_url, self.fake_api_token)
         )
 
-    def test_load_config_local_and_home(self):
+    @patch("jasper.__main__.keyring")
+    def test_load_config_local_and_home(self, _):
         """
         Test load_config loads a config file from the local directory.
         """

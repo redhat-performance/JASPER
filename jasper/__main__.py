@@ -36,6 +36,7 @@ import requests
 import yaml
 import keyring
 import keyring.errors
+import yaml.parser
 
 DEFAULT_ATTRIBUTION = True
 
@@ -210,13 +211,14 @@ def add_comment_to_issue(base_url, api_token, issue_key, comment_body):
     try:
         response = requests.post(comment_url, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
-        print("Comment added successfully.")
-        return True
+        if response.status_code == 201:
+            print("Comment added successfully.")
+            return True
     except requests.exceptions.RequestException as e:
         print(f"Error adding comment: {e}", file=sys.stderr)
         if hasattr(e, "response") and e.response is not None:
             print(f"Response Body: {e.response.text}", file=sys.stderr)
-        return False
+    return False
 
 
 def get_issue_transitions(base_url, api_token, issue_key):
@@ -270,8 +272,10 @@ def set_issue_transition(base_url, api_token, issue_key, transition_id):
             transitions_url, headers=headers, json=payload, timeout=30
         )
         response.raise_for_status()
-        print(f"Issue {issue_key} status changed successfully.")
-        return True
+        if response.status_code == 204:
+            print(f"Issue {issue_key} status changed successfully.")
+            return True
+        return False
     except requests.exceptions.RequestException as e:
         print(f"Error changing status for {issue_key}: {e}", file=sys.stderr)
         if hasattr(e, "response") and e.response is not None:
@@ -340,33 +344,53 @@ def get_multiline_comment():
 
 def load_config(config_path):
     """
-    Loads configuration from a YAML file.
-
-    Args:
-        config_path (str): The path to the YAML configuration file.
-
-    Returns:
-        tuple: (config_dict or None, path or None)
+    Loads configuration from a YAML file. Searches in this order:
+    1. User-provided path from --config (if provided, only this is used)
+    2. jasper_config.yaml in the current directory
+    3. jasper_config.yaml in $HOME
+    Raises if no config file is found or if YAML is invalid.
     """
-    # Try the provided path, then fallback to $HOME/jasper_config.yaml if not found
-    search_paths = [config_path]
-    if not os.path.isabs(config_path):
-        home_path = os.path.join(os.path.expanduser("~"), "jasper_config.yaml")
-        if home_path not in search_paths:
-            search_paths.append(home_path)
+    search_paths = []
+    # 1. User-provided path
+    if config_path:
+        # If the user provided a config path, only use that
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"No configuration file found at {config_path}")
+        search_paths = [config_path]
+    else:
+        # Fallback search order
+        cwd_config = os.path.join(os.getcwd(), "jasper_config.yaml")
+        home_config = os.path.join(os.path.expanduser("~"), "jasper_config.yaml")
+        search_paths = [cwd_config, home_config]
+
+    found_path = None
     for path in search_paths:
         if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    config = yaml.safe_load(f)
-                return config, path
-            except (yaml.YAMLError, IOError) as e:
-                print(
-                    f"Error reading or parsing config file {path}: {e}",
-                    file=sys.stderr,
-                )
-                return None, None
-    return None, None
+            found_path = path
+            break
+
+    # If no config file was found anywhere, raise an exception
+    if not found_path:
+        raise FileNotFoundError(
+            f"No configuration file found at {config_path}, ./jasper_config.yaml, "
+            "or $HOME/jasper_config.yaml"
+        )
+
+    # Try to load the one we found. If it fails, it's a fatal error.
+    try:
+        print(f"Loading configuration from: {found_path}")
+        with open(found_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        print("Configuration loaded successfully.")
+        return config, found_path
+    except (yaml.YAMLError, IOError) as e:
+        print(
+            f"Error reading or parsing config file {found_path}: {e}",
+            file=sys.stderr,
+        )
+        # Re-raise the exception to be handled by the caller. This makes
+        # an invalid config file a fatal error, which is the desired behavior.
+        raise
 
 
 def check_jira_auth(jira_url, api_token):
@@ -572,7 +596,11 @@ def main():
     )
 
     args = parser.parse_args()
-    config, config_path_used = load_config(args.config)
+    try:
+        config, config_path_used = load_config(args.config)
+    except Exception as e:
+        print(f"Error loading configuration: {e}", file=sys.stderr)
+        sys.exit(1)
     if config is None:
         config = {}
 
