@@ -41,6 +41,17 @@ jobs:
           name: coverage-report
           path: coverage.xml
 
+      - name: Show coverage summary
+        run: |
+          coverage report
+
+      - name: Add coverage summary to GitHub summary
+        run: |
+          coverage report > coverage.txt
+          cat coverage.txt
+          echo '### Coverage Report' >> $GITHUB_STEP_SUMMARY
+          cat coverage.txt >> $GITHUB_STEP_SUMMARY
+
       - name: Check if version was updated
         id: version_check
         run: |
