@@ -572,12 +572,12 @@ class TestJasperMain(unittest.TestCase):
 
         self.assertIn("No available status transitions", mock_stdout.getvalue())
 
-    @patch("argparse.ArgumentParser.parse_args")
-    @patch("sys.exit")
-    @patch("jasper.__main__.keyring.set_password")
     @patch("getpass.getpass", return_value="fake-token")
+    @patch("jasper.__main__.keyring.set_password")
+    @patch("sys.exit")
+    @patch("argparse.ArgumentParser.parse_args")
     def test_main_set_token_flow(
-        self, mock_getpass, mock_set_password, mock_exit, mock_args
+        self, mock_args, mock_exit, mock_set_password, mock_getpass
     ):
         """Test the --set-token command-line argument flow."""
         mock_args.return_value = MagicMock(
