@@ -15,6 +15,7 @@ from unittest.mock import patch, MagicMock
 import os
 import requests
 import yaml
+import json
 
 import jasper.__main__ as jasper_main
 
@@ -133,10 +134,17 @@ class TestJasperMain(unittest.TestCase):
         finally:
             os.remove(test_filename)
 
-    def test_load_config_missing_file(self):
-        """Test load_config raises on missing file."""
+    @patch("os.path.exists", return_value=False)
+    def test_load_config_missing_file(self, mock_exists):
+        """
+        Test load_config raises FileNotFoundError when no config file is found
+        in any of the search paths, regardless of the actual filesystem.
+        """
         with self.assertRaises(FileNotFoundError):
             jasper_main.load_config("no_such_file.yaml")
+
+        # Verify that the function actually checked for files
+        self.assertTrue(mock_exists.called)
 
     # --- Keyring Interaction Tests ---
 
@@ -242,6 +250,52 @@ class TestJasperMain(unittest.TestCase):
             self.assertIn("jasper_config.yaml", path)
         finally:
             os.remove(test_filename)
+
+    @patch("jasper.__main__.keyring")
+    @patch("jasper.__main__.requests.post")
+    def test_get_user_issues_in_sprints_success_multiple_users(self, mock_post, _):
+        """
+        Test get_user_issues_in_sprints constructs JQL correctly for multiple users.
+        """
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"issues": []}
+        mock_post.return_value = mock_resp
+
+        jasper_main.get_user_issues_in_sprints(
+            self.fake_jira_url, self.fake_api_token, ["user1", "user2"], [100]
+        )
+
+        mock_post.assert_called_once()
+        # Extract the 'data' argument which is a JSON string and parse it
+        sent_payload = json.loads(mock_post.call_args.kwargs["data"])
+        self.assertIn('assignee in ("user1", "user2")', sent_payload["jql"])
+
+    @patch("jasper.__main__.keyring")
+    @patch("jasper.__main__.requests.post")
+    def test_get_user_issues_in_sprints_success_single_user(self, mock_post, _):
+        """
+        Test get_user_issues_in_sprints constructs JQL correctly for a single user.
+        """
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "issues": [
+                {
+                    "key": "PROJ-1",
+                    "fields": {"summary": "Test issue", "assignee": {"name": "user1"}},
+                }
+            ]
+        }
+        mock_post.return_value = mock_resp
+
+        issues = jasper_main.get_user_issues_in_sprints(
+            self.fake_jira_url, self.fake_api_token, ["user1"], [100]
+        )
+
+        self.assertEqual(len(issues), 1)
+        sent_payload = json.loads(mock_post.call_args.kwargs["data"])
+        self.assertIn('assignee = "user1"', sent_payload["jql"])
 
 
 if __name__ == "__main__":
