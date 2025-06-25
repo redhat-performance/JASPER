@@ -47,10 +47,27 @@ jobs:
 
       - name: Add coverage summary to GitHub summary
         run: |
+          # First, generate the coverage report in JSON format
+          coverage json
+
+          # Start the HTML table and add the header row
           echo '### Coverage Report' >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          coverage report >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo '<table>' >> $GITHUB_STEP_SUMMARY
+          echo '<tr>' >> $GITHUB_STEP_SUMMARY
+          echo '<th>File</th>' >> $GITHUB_STEP_SUMMARY
+          echo '<th>Stmts</th>' >> $GITHUB_STEP_SUMMARY
+          echo '<th>Miss</th>' >> $GITHUB_STEP_SUMMARY
+          echo '<th>Cover</th>' >> $GITHUB_STEP_SUMMARY
+          echo '</tr>' >> $GITHUB_STEP_SUMMARY
+
+          # Use jq to parse the JSON and create a table row for each file
+          jq -r '.files | to_entries[] | "<tr><td>\(.key)</td><td>\(.value.summary.num_statements)</td><td>\(.value.summary.missing_lines)</td><td>\(.value.summary.percent_covered | round)%</td></tr>"' coverage.json >> $GITHUB_STEP_SUMMARY
+          
+          # Add the TOTAL row at the end
+          jq -r '.totals | "<tr><td><b>TOTAL</b></td><td><b>\(.num_statements)</b></td><td><b>\(.missing_lines)</b></td><td><b>\(.percent_covered | round)%</b></td></tr>"' coverage.json >> $GITHUB_STEP_SUMMARY
+
+          # Close the table
+          echo '</table>' >> $GITHUB_STEP_SUMMARY
 
       - name: Check if version was updated
         id: version_check
