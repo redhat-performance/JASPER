@@ -371,10 +371,13 @@ def load_config(config_path):
 
     # If no config file was found anywhere, raise an exception
     if not found_path:
-        raise FileNotFoundError(
-            f"No configuration file found at {config_path}, ./jasper_config.yaml, "
-            "or $HOME/jasper_config.yaml"
-        )
+        error_msg = (
+            f"No configuration file found at the specified path: {config_path}"
+            if config_path
+            else "No configuration file found in ./jasper_config.yaml or "
+            "$HOME/jasper_config.yaml"
+         )
+        raise FileNotFoundError(error_msg)
 
     # Try to load the one we found. If it fails, it's a fatal error.
     try:
@@ -561,9 +564,9 @@ def main():
     # Define command-line arguments for configuration and actions.
     parser.add_argument(
         "--config",
-        default="jasper_config.yaml",
-        help="Path to the YAML config file (default: jasper_config.yaml, "
-        "or $HOME/jasper_config.yaml)",
+        default=None,
+        help="Path to the YAML config file. If not provided, searches for "
+        "jasper_config.yaml in the current directory, then in $HOME.",
     )
     parser.add_argument(
         "--jira-url",
