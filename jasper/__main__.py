@@ -376,7 +376,7 @@ def load_config(config_path):
             if config_path
             else "No configuration file found in ./jasper_config.yaml or "
             "$HOME/jasper_config.yaml"
-         )
+        )
         raise FileNotFoundError(error_msg)
 
     # Try to load the one we found. If it fails, it's a fatal error.
