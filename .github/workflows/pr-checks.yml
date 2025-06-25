@@ -1,0 +1,49 @@
+name: PR Checks
+
+on:
+  pull_request:
+
+jobs:
+  lint-and-version:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8
+
+      - name: Run flake8 linting
+        run: |
+          flake8 jasper
+
+      - name: Check if version was updated
+        id: version_check
+        run: |
+          # Get the base and head commit for the PR
+          git fetch origin ${{ github.base_ref }} --depth=1
+          # Check if pyproject.toml was changed in the PR
+          if git diff --name-only origin/${{ github.base_ref }} | grep -q '^pyproject.toml$'; then
+            # Check if the version line was changed
+            if git diff origin/${{ github.base_ref }} -- pyproject.toml | grep -E '^\+version ?='; then
+              echo "Version was updated in pyproject.toml."
+              echo "version_updated=true" >> $GITHUB_OUTPUT
+            else
+              echo "::warning file=pyproject.toml::pyproject.toml was changed, but version was not updated."
+              echo "version_updated=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            # If pyproject.toml was not changed, check if there are other changes in the PR
+            if git diff --name-only origin/${{ github.base_ref }} | grep -vq '^pyproject.toml$'; then
+              echo "::warning file=pyproject.toml::pyproject.toml version was not updated in this PR. Please consider updating the version if this is a significant change."
+              echo "version_updated=false" >> $GITHUB_OUTPUT
+            fi
+          fi
