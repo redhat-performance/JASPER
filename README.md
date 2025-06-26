@@ -90,6 +90,7 @@ jasper_attribution: true
 - `--set-token`: Store the Jira API token securely in the system's keyring and exit
 - `--no-jasper-attribution`: Do not add JASPER attribution to comments (overrides config)
 - `--help`: Show all options
+- `-v/-vv`: Show INFO/DEBUG log messages
 
 ---
 
@@ -157,15 +158,7 @@ You can interact with the tool using the following options:
   Enter `q` or `quit` to exit the program.
 
 ```console
-API token found in secure storage.
-API authentication successful.
-Checking specified board IDs: [12345]
-Found 1 boards. Looking for active sprints...
-
-Found 1 active sprints.
-
-Querying for issues with JQL:
-  > assignee in ("foo@example.com", "bar@example.com") AND sprint in (7890) ORDER BY updated DESC
+JASPER is starting...
 
 --- Active Sprint Items ---
   1: [PROJECT-7760] Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed accumsan porta sem. (Status: In Progress, Priority: Normal) (Assignee: bar@example.com)
