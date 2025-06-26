@@ -16,6 +16,7 @@ import os
 import json
 import io
 import builtins
+import logging
 import requests
 import yaml
 import keyring.errors
@@ -341,6 +342,7 @@ class TestJasperMain(unittest.TestCase):
             board_ids=None,
             set_token=False,
             no_jasper_attribution=False,
+            verbose=0,
         )
         mock_config.return_value = (
             {
@@ -383,6 +385,7 @@ class TestJasperMain(unittest.TestCase):
             board_ids=None,
             set_token=False,
             no_jasper_attribution=False,
+            verbose=0,
         )
         mock_config.return_value = (
             {
@@ -425,6 +428,7 @@ class TestJasperMain(unittest.TestCase):
             board_ids=None,
             set_token=False,
             no_jasper_attribution=False,
+            verbose=0,
         )
         mock_config.return_value = (
             {
@@ -446,13 +450,13 @@ class TestJasperMain(unittest.TestCase):
     @patch(
         "jasper.__main__.load_config", side_effect=FileNotFoundError("Config not found")
     )
-    @patch("sys.stderr", new_callable=io.StringIO)
+    @patch("jasper.__main__.logger")
     @patch("sys.exit")
     def test_main_config_load_error(
-        self, mock_exit, mock_stderr, mock_config, mock_args
+        self, mock_exit, mock_logger, mock_config, mock_args
     ):
         """Test main exits gracefully if config file cannot be loaded."""
-        mock_args.return_value = MagicMock(config="nonexistent.yaml")
+        mock_args.return_value = MagicMock(config="nonexistent.yaml", verbose=0)
 
         # Let the mocked sys.exit raise the actual SystemExit exception
         # to correctly halt execution flow inside main().
@@ -464,8 +468,10 @@ class TestJasperMain(unittest.TestCase):
         # Check that the exit code is correct
         self.assertEqual(cm.exception.code, 1)
 
-        # Verify that the correct error message was printed to stderr.
-        self.assertIn("Error loading configuration", mock_stderr.getvalue())
+        # Verify that the correct error message was logged.
+        mock_logger.critical.assert_called_with(
+            "Failed to initialize: Config not found"
+        )
 
     @patch("argparse.ArgumentParser.parse_args")
     @patch("jasper.__main__.load_config")
@@ -501,6 +507,7 @@ class TestJasperMain(unittest.TestCase):
             board_ids=None,
             set_token=False,
             no_jasper_attribution=False,
+            verbose=0,
         )
         mock_config.return_value = (
             {
@@ -536,12 +543,12 @@ class TestJasperMain(unittest.TestCase):
     @patch("jasper.__main__.get_active_sprints", return_value=[100])
     @patch("jasper.__main__.get_user_issues_in_sprints")
     @patch("jasper.__main__.get_issue_transitions", return_value=[])
-    @patch("sys.stdout", new_callable=io.StringIO)
+    @patch("jasper.__main__.logger")
     @patch("builtins.input", side_effect=["1", "s", "b", "q"])
     def test_main_action_update_status_no_transitions(
         self,
         mock_input,
-        mock_stdout,
+        mock_logger,
         mock_get_transitions,
         mock_get_issues,
         mock_sprints,
@@ -557,6 +564,7 @@ class TestJasperMain(unittest.TestCase):
             board_ids=None,
             set_token=False,
             no_jasper_attribution=False,
+            verbose=0,
         )
         mock_config.return_value = (
             {
@@ -570,7 +578,9 @@ class TestJasperMain(unittest.TestCase):
 
         jasper_main.main()
 
-        self.assertIn("No available status transitions", mock_stdout.getvalue())
+        mock_logger.warning.assert_any_call(
+            "No available status transitions for this issue."
+        )
 
     @patch("getpass.getpass", return_value="fake-token")
     @patch("jasper.__main__.keyring.set_password")
@@ -588,6 +598,7 @@ class TestJasperMain(unittest.TestCase):
             board_ids=[1],
             set_token=True,  # Simulate --set-token flag
             no_jasper_attribution=False,
+            verbose=0,
         )
         # We need to return a valid config, even if it's empty,
         # to prevent the main() function from exiting early.
@@ -620,13 +631,15 @@ class TestJasperMain(unittest.TestCase):
     @patch("jasper.__main__.check_jira_auth", return_value=True)
     @patch("builtins.input", return_value="n")  # User chooses not to save token
     @patch("getpass.getpass", return_value="new-token")
-    @patch("sys.stderr", new_callable=io.StringIO)
+    @patch("jasper.__main__.logger")
     def test_get_api_token_no_keyring_backend(
-        self, mock_stderr, mock_getpass, mock_input, mock_check_auth, mock_keyring_get
+        self, mock_logger, mock_getpass, mock_input, mock_check_auth, mock_keyring_get
     ):
         """Test the flow when the keyring backend is not available."""
         get_api_token_with_auth_check("service", "user", self.fake_jira_url)
-        self.assertIn("`keyring` backend not found", mock_stderr.getvalue())
+        mock_logger.warning.assert_any_call(
+            "`keyring` backend not found. Falling back to password prompt."
+        )
 
     @patch("jasper.__main__.keyring.get_password", return_value=None)
     @patch("jasper.__main__.check_jira_auth", side_effect=[False, True])
@@ -656,9 +669,9 @@ class TestJasperMain(unittest.TestCase):
     @patch("jasper.__main__.load_config")
     @patch("jasper.__main__.get_api_token_with_auth_check", return_value="fake-token")
     @patch("jasper.__main__.get_active_sprints", return_value=[])
-    @patch("sys.stdout", new_callable=io.StringIO)
+    @patch("jasper.__main__.logger")
     def test_main_no_active_sprints(
-        self, mock_stdout, mock_sprints, mock_token, mock_config, mock_args
+        self, mock_logger, mock_sprints, mock_token, mock_config, mock_args
     ):
         """Test the main flow when no active sprints are found."""
         mock_args.return_value = MagicMock(
@@ -668,6 +681,7 @@ class TestJasperMain(unittest.TestCase):
             board_ids=None,
             set_token=False,
             no_jasper_attribution=False,
+            verbose=0,
         )
         mock_config.return_value = (
             {"jira_url": self.fake_jira_url, "usernames": ["user"], "board_ids": [1]},
@@ -678,7 +692,9 @@ class TestJasperMain(unittest.TestCase):
             jasper_main.main()
 
         self.assertEqual(cm.exception.code, 0)
-        self.assertIn("No active sprints found", mock_stdout.getvalue())
+        mock_logger.warning.assert_called_with(
+            "No active sprints found or an error occurred. Exiting."
+        )
 
     @patch("argparse.ArgumentParser.parse_args")
     @patch("jasper.__main__.load_config")
@@ -703,6 +719,7 @@ class TestJasperMain(unittest.TestCase):
             board_ids=None,
             set_token=False,
             no_jasper_attribution=False,
+            verbose=0,
         )
         mock_config.return_value = (
             {"jira_url": self.fake_jira_url, "usernames": ["user"], "board_ids": [1]},
@@ -740,6 +757,7 @@ class TestJasperMain(unittest.TestCase):
             jira_url=None,
             usernames=None,
             board_ids=None,
+            verbose=0,
         )
         mock_config.return_value = (
             {"jira_url": self.fake_jira_url, "usernames": ["user"], "board_ids": [1]},
@@ -775,6 +793,7 @@ class TestJasperMain(unittest.TestCase):
             jira_url=None,
             usernames=None,
             board_ids=None,
+            verbose=0,
         )
         mock_config.return_value = (
             {"jira_url": self.fake_jira_url, "usernames": ["user"], "board_ids": [1]},
@@ -817,6 +836,7 @@ class TestJasperMain(unittest.TestCase):
             jira_url=None,
             usernames=None,
             board_ids=None,
+            verbose=0,
         )
         mock_config.return_value = (
             {"jira_url": self.fake_jira_url, "usernames": ["user"], "board_ids": [1]},
@@ -857,6 +877,53 @@ class TestJasperMain(unittest.TestCase):
 
                 run_main_block()
                 self.assertIn("Interrupted by user. Exiting.", mock_stdout.getvalue())
+
+    @patch("argparse.ArgumentParser.parse_args")
+    @patch("jasper.__main__.load_config")
+    @patch("jasper.__main__.get_api_token_with_auth_check", return_value="fake-token")
+    @patch("jasper.__main__.get_active_sprints", return_value=[])
+    @patch("sys.exit")
+    def test_main_verbosity_flags(
+        self,
+        mock_exit,
+        mock_sprints,
+        mock_token,
+        mock_config,
+        mock_args,
+    ):
+        """Test that -v and -vv flags correctly set the logging level."""
+        # Common mocks for a minimal run
+        mock_config.return_value = (
+            {"jira_url": self.fake_jira_url, "usernames": ["user"], "board_ids": [1]},
+            "c.yaml",
+        )
+        # We expect SystemExit because the program will exit when no sprints are found.
+        mock_exit.side_effect = SystemExit(0)
+
+        test_cases = [
+            (0, logging.WARNING),  # Default
+            (1, logging.INFO),  # -v
+            (2, logging.DEBUG),  # -vv
+        ]
+
+        for verbosity, expected_level in test_cases:
+            with self.subTest(verbosity=verbosity, expected_level=expected_level):
+                mock_args.return_value = MagicMock(
+                    config=None,
+                    jira_url=None,
+                    usernames=None,
+                    board_ids=None,
+                    set_token=False,
+                    no_jasper_attribution=False,
+                    verbose=verbosity,
+                )
+
+                # main() will call sys.exit, so we wrap it
+                with self.assertRaises(SystemExit):
+                    jasper_main.main()
+
+                # Check the level of the global logger instance
+                self.assertEqual(jasper_main.logger.level, expected_level)
 
 
 if __name__ == "__main__":
