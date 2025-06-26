@@ -37,8 +37,43 @@ import yaml
 import keyring
 import keyring.errors
 import yaml.parser
+import logging
+
+# Initialize logger
+logger = logging.getLogger("JASPER")
 
 DEFAULT_ATTRIBUTION = True
+
+
+# --- Custom Formatter for Color-coded Logs ---
+class ColoredFormatter(logging.Formatter):
+    """
+    Custom formatter to add ANSI color codes to log messages based on severity.
+    This works on UNIX-like systems and modern Windows terminals.
+    """
+
+    GREY = "\x1b[38;20m"
+    GREEN = "\x1b[32m"
+    YELLOW = "\x1b[33m"
+    RED = "\x1b[31m"
+    BOLD_RED = "\x1b[31;1m"
+    RESET = "\x1b[0m"
+
+    def __init__(self, fmt, datefmt=None):
+        super().__init__(fmt, datefmt)
+        self.FORMATS = {
+            logging.DEBUG: self.GREY + fmt + self.RESET,
+            logging.INFO: self.GREEN + fmt + self.RESET,
+            logging.WARNING: self.YELLOW + fmt + self.RESET,
+            logging.ERROR: self.RED + fmt + self.RESET,
+            logging.CRITICAL: self.BOLD_RED + fmt + self.RESET,
+        }
+
+    def format(self, record):
+        log_fmt = self.FORMATS.get(record.levelno)
+        formatter = logging.Formatter(log_fmt, datefmt=self.datefmt)
+        return formatter.format(record)
+
 
 # --- Jira API Functions ---
 
@@ -66,10 +101,10 @@ def get_active_sprints(base_url, api_token, board_ids, max_retries=3, retry_dela
         "Accept": "application/json",
     }
 
-    print(f"Checking specified board IDs: {board_ids}")
+    logger.info(f"Checking specified board IDs: {board_ids}")
     boards_to_check = [{"id": board_id} for board_id in board_ids]
 
-    print(f"Found {len(boards_to_check)} boards. Looking for active sprints...")
+    logger.info(f"Found {len(boards_to_check)} boards. Looking for active sprints...")
 
     # Iterate through the boards and find sprints with the state "active".
     for board in boards_to_check:
@@ -84,10 +119,9 @@ def get_active_sprints(base_url, api_token, board_ids, max_retries=3, retry_dela
                     retry_after = int(
                         sprint_response.headers.get("Retry-After", retry_delay)
                     )
-                    print(
+                    logger.warning(
                         "Rate limited by Jira API (HTTP 429). "
-                        f"Retrying after {retry_after}s...",
-                        file=sys.stderr,
+                        f"Retrying after {retry_after}s..."
                     )
                     time.sleep(retry_after)
                     attempt += 1
@@ -101,19 +135,17 @@ def get_active_sprints(base_url, api_token, board_ids, max_retries=3, retry_dela
             except requests.exceptions.RequestException as e:
                 attempt += 1
                 if attempt < max_retries:
-                    print(
-                        f"Warning: Could not fetch sprints for board ID {board['id']} "
+                    logger.warning(
+                        f"Could not fetch sprints for board ID {board['id']} "
                         f"(attempt {attempt}/{max_retries}). "
                         f"Retrying in {retry_delay}s. "
-                        f"Error: {e}",
-                        file=sys.stderr,
+                        f"Error: {e}"
                     )
                     time.sleep(retry_delay)
                 else:
-                    print(
-                        f"Warning: Could not fetch sprints for board ID {board['id']} "
-                        f"after {max_retries} attempts. Error: {e}",
-                        file=sys.stderr,
+                    logger.error(
+                        f"Could not fetch sprints for board ID {board['id']} "
+                        f"after {max_retries} attempts. Error: {e}"
                     )
     return active_sprint_ids
 
@@ -150,8 +182,8 @@ def get_user_issues_in_sprints(base_url, api_token, usernames, sprint_ids):
         "maxResults": 100,
     }
 
-    print("\nQuerying for issues with JQL:")
-    print(f"  > {jql}")
+    logger.info("Querying for issues with JQL...")
+    logger.debug(f"  > {jql}")
 
     headers = {
         "Authorization": f"Bearer {api_token}",
@@ -181,9 +213,9 @@ def get_user_issues_in_sprints(base_url, api_token, usernames, sprint_ids):
                 issue["_jasper_assignee"] = ""
         return issues
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching issues: {e}", file=sys.stderr)
+        logger.error(f"Error fetching issues: {e}")
         if hasattr(e, "response") and e.response is not None:
-            print(f"Response Body: {e.response.text}", file=sys.stderr)
+            logger.debug(f"Response Body: {e.response.text}")
         return []
 
 
@@ -202,7 +234,7 @@ def add_comment_to_issue(base_url, api_token, issue_key, comment_body):
     """
     comment_url = f"{base_url}/rest/api/2/issue/{issue_key}/comment"
     payload = {"body": comment_body}
-    print(f"\nAdding comment to issue {issue_key}...")
+    logger.info(f"Adding comment to issue {issue_key}...")
     headers = {
         "Authorization": f"Bearer {api_token}",
         "Accept": "application/json",
@@ -212,12 +244,12 @@ def add_comment_to_issue(base_url, api_token, issue_key, comment_body):
         response = requests.post(comment_url, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
         if response.status_code == 201:
-            print("Comment added successfully.")
+            logger.info("Comment added successfully.")
             return True
     except requests.exceptions.RequestException as e:
-        print(f"Error adding comment: {e}", file=sys.stderr)
+        logger.error(f"Error adding comment: {e}")
         if hasattr(e, "response") and e.response is not None:
-            print(f"Response Body: {e.response.text}", file=sys.stderr)
+            logger.debug(f"Response Body: {e.response.text}")
     return False
 
 
@@ -243,7 +275,7 @@ def get_issue_transitions(base_url, api_token, issue_key):
         response.raise_for_status()
         return response.json().get("transitions", [])
     except requests.exceptions.RequestException as e:
-        print(f"Error getting transitions for {issue_key}: {e}", file=sys.stderr)
+        logger.error(f"Error getting transitions for {issue_key}: {e}")
         return []
 
 
@@ -273,13 +305,13 @@ def set_issue_transition(base_url, api_token, issue_key, transition_id):
         )
         response.raise_for_status()
         if response.status_code == 204:
-            print(f"Issue {issue_key} status changed successfully.")
+            logger.info(f"Issue {issue_key} status changed successfully.")
             return True
         return False
     except requests.exceptions.RequestException as e:
-        print(f"Error changing status for {issue_key}: {e}", file=sys.stderr)
+        logger.error(f"Error changing status for {issue_key}: {e}")
         if hasattr(e, "response") and e.response is not None:
-            print(f"Response Body: {e.response.text}", file=sys.stderr)
+            logger.debug(f"Response Body: {e.response.text}")
         return False
 
 
@@ -381,18 +413,15 @@ def load_config(config_path):
 
     # Try to load the one we found. If it fails, it's a fatal error.
     try:
-        print(f"Loading configuration from: {found_path}")
+        logger.info(f"Loading configuration from: {found_path}")
         with open(found_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
-        print("Configuration loaded successfully.")
+        logger.info("Configuration loaded successfully.")
         return config, found_path
     except (yaml.YAMLError, IOError) as e:
-        print(
-            f"Error reading or parsing config file {found_path}: {e}",
-            file=sys.stderr,
-        )
         # Re-raise the exception to be handled by the caller. This makes
         # an invalid config file a fatal error, which is the desired behavior.
+        logger.critical(f"Error reading or parsing config file {found_path}: {e}")
         raise
 
 
@@ -417,13 +446,10 @@ def check_jira_auth(jira_url, api_token):
         if resp.status_code == 200:
             return True
         else:
-            print(
-                f"Authentication failed: {resp.status_code} {resp.reason}",
-                file=sys.stderr,
-            )
+            logger.warning(f"Authentication failed: {resp.status_code} {resp.reason}")
             return False
     except requests.exceptions.RequestException as e:
-        print(f"Error connecting to Jira: {e}", file=sys.stderr)
+        logger.error(f"Error connecting to Jira: {e}")
         return False
 
 
@@ -447,24 +473,21 @@ def get_api_token_with_auth_check(service_name, keyring_user, jira_url):
             token = keyring.get_password(service_name, keyring_user)
             if token:
                 from_keyring = True
-                print("API token found in secure storage.")
+                logger.info("API token found in secure storage.")
         except keyring.errors.NoKeyringError:
-            print(
-                "Warning: `keyring` backend not found. Falling back to password "
-                "prompt.",
-                file=sys.stderr,
+            logger.warning(
+                "`keyring` backend not found. Falling back to password prompt."
             )
-            print(
+            logger.warning(
                 "For secure storage, please install a backend "
-                "(e.g., 'pip install keyrings.cryptfile')",
-                file=sys.stderr,
+                "(e.g., 'pip install keyrings.cryptfile')"
             )
         except Exception as e:
-            print(f"An unexpected error occurred with keyring: {e}", file=sys.stderr)
+            logger.error(f"An unexpected error occurred with keyring: {e}")
 
         if not token:
             if first_prompt:
-                print("API token not found in storage.")
+                logger.warning("API token not found in storage.")
                 if jira_url:
                     base = jira_url.rstrip("/")
                     tip_url = (
@@ -498,26 +521,23 @@ def get_api_token_with_auth_check(service_name, keyring_user, jira_url):
                 if store in ("", "y", "yes"):
                     try:
                         keyring.set_password(service_name, keyring_user, token)
-                        print("API token stored securely in keyring.")
+                        logger.info("API token stored securely in keyring.")
                     except Exception as e:
-                        print(f"Could not store token in keyring: {e}", file=sys.stderr)
+                        logger.error(f"Could not store token in keyring: {e}")
             except Exception as e:
-                print(f"Could not read API token: {e}", file=sys.stderr)
+                logger.critical(f"Could not read API token: {e}")
                 sys.exit(1)
 
         # Check authentication
         if check_jira_auth(jira_url, token):
-            print("API authentication successful.")
+            logger.info("API authentication successful.")
             return token
         else:
             if from_keyring:
-                print(
-                    "Stored API token is invalid. Please reset your token.",
-                    file=sys.stderr,
-                )
+                logger.critical("Stored API token is invalid. Please reset your token.")
                 sys.exit(1)
             else:
-                print("Invalid API token. Please try again.\n")
+                logger.warning("Invalid API token. Please try again.\n")
 
 
 def set_api_token(service_name, user):
@@ -532,20 +552,19 @@ def set_api_token(service_name, user):
     try:
         token = getpass.getpass("Enter your Jira API Token: ")
         keyring.set_password(service_name, user, token)
-        print(
-            f"\nToken stored successfully for user '{user}' in service "
+        logger.info(
+            f"Token stored successfully for user '{user}' in service "
             f"'{service_name}'."
         )
-        print("You will not be prompted for it again on this machine.")
+        logger.info("You will not be prompted for it again on this machine.")
         sys.exit(0)  # Exit after successfully setting the token.
     except keyring.errors.NoKeyringError:
-        print(
-            "Error: Could not store token because no `keyring` backend is available.",
-            file=sys.stderr,
+        logger.critical(
+            "Could not store token because no `keyring` backend is available."
         )
         sys.exit(1)
     except Exception as e:
-        print(f"Could not store token: {e}", file=sys.stderr)
+        logger.critical(f"Could not store token: {e}")
         sys.exit(1)
 
 
@@ -597,20 +616,57 @@ def main():
         action="store_true",
         help="Do not add JASPER attribution to comments.",
     )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase verbosity level. -v for INFO, -vv for DEBUG.",
+    )
 
     args = parser.parse_args()
+
+    # Initial user-facing message to stdout to show the program has started.
+    print("JASPER is starting...")
+
+    # Configure logging based on verbosity level
+    if args.verbose == 1:
+        log_level = logging.INFO
+    elif args.verbose >= 2:
+        log_level = logging.DEBUG
+    else:
+        log_level = logging.WARNING
+
+    handler = logging.StreamHandler(sys.stderr)
+    log_format = "%(asctime)s - %(levelname)s - %(message)s"
+    date_format = "%Y-%m-%d %H:%M:%S"
+    formatter = ColoredFormatter(log_format, datefmt=date_format)
+    handler.setFormatter(formatter)
+
+    # Clear existing handlers and add the new one
+    if logger.hasHandlers():
+        logger.handlers.clear()
+    logger.addHandler(handler)
+    logger.setLevel(log_level)
+
+    # Suppress noisy logs from underlying libraries
+    logging.getLogger("requests").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
     try:
         config, config_path_used = load_config(args.config)
-    except Exception as e:
-        print(f"Error loading configuration: {e}", file=sys.stderr)
+    except Exception:
+        # The exception is already logged by the load_config function
         sys.exit(1)
     if config is None:
         config = {}
 
     if config_path_used:
-        print(f"Loaded configuration from: {config_path_used}")
+        logger.info(f"Loaded configuration from: {config_path_used}")
     else:
-        print("No configuration file found. Using command-line arguments only.")
+        logger.warning(
+            "No configuration file found. Using command-line arguments only."
+        )
 
     # Prioritize command-line args over config file values.
     jira_url = args.jira_url or config.get("jira_url")
@@ -631,13 +687,11 @@ def main():
     if not board_ids:
         missing.append("'board_ids'")
     if missing:
+        logger.critical(f"Missing required configuration: {', '.join(missing)}")
         print(
-            f"Error: Missing required configuration: {', '.join(missing)}",
+            "\nProvide these as command-line arguments or in your "
+            "jasper_config.yaml file.",
             file=sys.stderr,
-        )
-        print(
-            "Provide these as command-line arguments or in your "
-            "jasper_config.yaml file."
         )
         parser.print_help()
         sys.exit(1)
@@ -666,9 +720,9 @@ def main():
     # Fetch initial data: active sprints and issues.
     active_sprints = get_active_sprints(jira_url, api_token, board_ids=board_ids)
     if not active_sprints:
-        print("\nNo active sprints found or an error occurred. Exiting.")
+        logger.warning("No active sprints found or an error occurred. Exiting.")
         sys.exit(0)
-    print(f"\nFound {len(active_sprints)} active sprints.")
+    logger.info(f"Found {len(active_sprints)} active sprints.")
 
     # Query issues for all specified usernames and combine results
     issues = get_user_issues_in_sprints(jira_url, api_token, usernames, active_sprints)
@@ -678,16 +732,15 @@ def main():
     display_issues(issues)
 
     # --- Main Interaction Loop ---
-    # Use all_issues instead of issues in the rest of the main loop
     while True:
         try:
             choice = input("Enter an issue number to select, (r)efresh, or (q)uit: ")
             if choice.lower() in ("q", "quit"):
-                print("\nExiting.")
+                logger.info("Exiting.")
                 break
 
             if choice.lower() in ("r", "refresh"):
-                print("\nRefreshing issue list...")
+                logger.info("Refreshing issue list...")
                 issues = get_user_issues_in_sprints(
                     jira_url, api_token, usernames, active_sprints
                 )
@@ -720,7 +773,7 @@ def main():
                 elif action in ("o", "open"):
                     issue_url = f"{jira_url.rstrip('/')}/browse/{issue_key}"
                     webbrowser.open_new_tab(issue_url)
-                    print(f"Opening {issue_url} in your browser...")
+                    logger.info(f"Opening {issue_url} in your browser...")
 
                 elif action in ("c", "comment"):
                     comment = get_multiline_comment()
@@ -735,7 +788,9 @@ def main():
                 elif action in ("s", "status"):
                     transitions = get_issue_transitions(jira_url, api_token, issue_key)
                     if not transitions:
-                        print("No available status transitions for this issue.")
+                        logger.warning(
+                            "No available status transitions for this issue."
+                        )
                         continue
 
                     print("\nAvailable Statuses:")
@@ -761,7 +816,7 @@ def main():
                         if trans_choice in ("b", "back"):
                             break
                         if trans_choice in ("q", "quit"):
-                            print("\nExiting.")
+                            logger.info("Exiting.")
                             sys.exit(0)
                         if not trans_choice.strip():
                             # Empty input: re-display the list of available statuses
@@ -776,7 +831,9 @@ def main():
                                 if set_issue_transition(
                                     jira_url, api_token, issue_key, transition_id
                                 ):
-                                    print("\nStatus updated. Refresh to see changes.")
+                                    logger.info(
+                                        "Status updated. Refresh to see changes."
+                                    )
                                     # Stay in the issue action sub-loop
                             else:
                                 print("Invalid transition number.")
@@ -788,7 +845,7 @@ def main():
                                 print(f"  {i+1}: {t['name']}")
 
                 elif action in ("q", "quit"):
-                    print("\nExiting.")
+                    logger.info("Exiting.")
                     sys.exit(0)
                 else:
                     print("Invalid action. Please choose from the options.")
