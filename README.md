@@ -24,11 +24,18 @@ Once installed, you can run JASPER from anywhere using the Python module syntax:
 python3 -m jasper
 ```
 
-Or (depending on your system configuration) simply as:
+Or, if your python scripts directory is in your default execution path, simply as:
 
 ```sh
 jasper
 ```
+
+> [!TIP]
+> On a Linux system, you may need `${HOME}/.local/bin` in your `$PATH` in order to
+> execute the module directly without the `python -m` command.
+> ```sh
+> export PATH="$HOME/.local/bin:$PATH"
+> ```
 
 ---
 

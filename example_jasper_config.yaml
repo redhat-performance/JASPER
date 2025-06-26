@@ -2,7 +2,7 @@
 jira_url: "https://your-company.atlassian.net"
 
 # The Jira Account IDs or usernames to use for queries
-username:
+usernames:
   - "your.jira.username"
   - "foo@example.com"
 
