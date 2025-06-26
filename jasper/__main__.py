@@ -27,6 +27,7 @@ License: Apache License, Version 2.0
 
 import json
 import argparse
+import logging
 import getpass
 import sys
 import os
@@ -37,7 +38,6 @@ import yaml
 import keyring
 import keyring.errors
 import yaml.parser
-import logging
 
 # Initialize logger
 logger = logging.getLogger("JASPER")
@@ -832,9 +832,12 @@ def main():
                                 if set_issue_transition(
                                     jira_url, api_token, issue_key, transition_id
                                 ):
-                                    logger.info(
-                                        "Status updated. Refresh to see changes."
+                                    print(
+                                        "Status updated. Refresh to see changes.\n"
+                                        "\nAvailable Statuses:"
                                     )
+                                    for i, t in enumerate(transitions_sorted):
+                                        print(f"  {i+1}: {t['name']}")
                                     # Stay in the issue action sub-loop
                             else:
                                 print("Invalid transition number.")
