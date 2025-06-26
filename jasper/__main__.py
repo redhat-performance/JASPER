@@ -655,8 +655,9 @@ def main():
 
     try:
         config, config_path_used = load_config(args.config)
-    except Exception:
-        # The exception is already logged by the load_config function
+    except Exception as e:
+        # Log the configuration loading error before exiting.
+        logger.critical(f"Failed to initialize: {e}")
         sys.exit(1)
     if config is None:
         config = {}
