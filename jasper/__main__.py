@@ -34,6 +34,7 @@ import os
 import webbrowser
 import time
 import requests
+from typing import Callable
 import yaml
 import keyring
 import keyring.errors
@@ -78,7 +79,102 @@ class ColoredFormatter(logging.Formatter):
 # --- Jira API Functions ---
 
 
-def get_active_sprints(base_url, api_token, board_ids, max_retries=3, retry_delay=2):
+def jira_query(
+    base_url,
+    api_path,
+    api_token,
+    method: Callable = None,
+    json_payload=None,
+    max_retries=3,
+    retry_delay=2,
+):
+    """
+    Executes a JQL query against the Jira REST API.
+
+    Args:
+        base_url (str): The base URL of the Jira instance.
+        api_path (str): The API path to use for the query (e.g., "/rest/api/2/search").
+        api_token (str): The API token for authentication.
+        method (function): The HTTP requests() method to use (default is requests.get).
+        json_payload (dict): Optional JSON payload to send with the request.
+        max_retries (int): Number of retries for transient errors.
+        retry_delay (int): Delay in seconds between retries.
+
+    Returns:
+        list[dict]: A list of issue dictionaries, or an empty list on failure.
+    """
+    query_url = f"{base_url}{api_path}"
+    headers = {
+        "Authorization": f"Bearer {api_token}",
+        "Accept": "application/json",
+    }
+    if json_payload:
+        headers["Content-Type"] = "application/json"
+
+    # Use the get method by default if no method is provided
+    http_method = requests.get if method is None else method
+
+    attempt = 0
+    while attempt < max_retries:
+        try:
+            response = http_method(
+                query_url, headers=headers, data=json.dumps(json_payload), timeout=30
+            )
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", retry_delay))
+                logger.warning(
+                    "Rate limited by Jira API (HTTP 429)."
+                    f"Retrying after {retry_after}s..."
+                )
+                time.sleep(retry_after)
+                attempt += 1
+                continue
+            return response
+        except requests.exceptions.RequestException as e:
+            attempt += 1
+            if attempt < max_retries:
+                logger.warning(
+                    f"Error executing JQL query (attempt {attempt}/{max_retries}). "
+                    f"Retrying in {retry_delay}s. Error: {e}"
+                )
+                time.sleep(retry_delay)
+            else:
+                raise
+    return []
+
+
+def check_jira_auth(base_url, api_token):
+    """
+    Check if the provided Jira credentials are valid using Bearer token.
+
+    Args:
+        base_url (str): The Jira instance URL.
+        api_token (str): The API token for authentication.
+
+    Returns:
+        bool: True if authentication is successful, False otherwise.
+    """
+    test_api_path = "/rest/api/2/myself"
+    try:
+        test_response = jira_query(
+            base_url,
+            test_api_path,
+            api_token,
+        )
+        if test_response and test_response.status_code == 200:
+            return True
+        if test_response:
+            logger.warning(
+                f"Authentication failed: {test_response.status_code} "
+                f"{test_response.reason}"
+            )
+        return False
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error connecting to Jira: {e}")
+        return False
+
+
+def get_active_sprints(base_url, api_token, board_ids, **kwargs):
     """
     Fetches active sprints from specified boards.
 
@@ -86,8 +182,6 @@ def get_active_sprints(base_url, api_token, board_ids, max_retries=3, retry_dela
         base_url (str): The base URL of the Jira instance.
         api_token (str): The API token for authentication.
         board_ids (list[int]): List of Jira board IDs to check.
-        max_retries (int): Number of retries for transient errors.
-        retry_delay (int): Delay in seconds between retries.
 
     Returns:
         list[int]: A list of active sprint IDs, or an empty list on failure.
@@ -95,11 +189,6 @@ def get_active_sprints(base_url, api_token, board_ids, max_retries=3, retry_dela
     if not board_ids:
         raise ValueError("board_ids is required for get_active_sprints()")
     active_sprint_ids = []
-    boards_to_check = []
-    headers = {
-        "Authorization": f"Bearer {api_token}",
-        "Accept": "application/json",
-    }
 
     logger.info(f"Checking specified board IDs: {board_ids}")
     boards_to_check = [{"id": board_id} for board_id in board_ids]
@@ -108,45 +197,20 @@ def get_active_sprints(base_url, api_token, board_ids, max_retries=3, retry_dela
 
     # Iterate through the boards and find sprints with the state "active".
     for board in boards_to_check:
-        attempt = 0
-        while attempt < max_retries:
-            try:
-                sprint_url = (
-                    f"{base_url}/rest/agile/1.0/board/{board['id']}/sprint?state=active"
-                )
-                sprint_response = requests.get(sprint_url, headers=headers, timeout=30)
-                if sprint_response.status_code == 429:
-                    retry_after = int(
-                        sprint_response.headers.get("Retry-After", retry_delay)
+        try:
+            sprint_api_path = f"/rest/agile/1.0/board/{board['id']}/sprint?state=active"
+            sprint_response = jira_query(base_url, sprint_api_path, api_token)
+            sprint_response.raise_for_status()
+            sprints = sprint_response.json().get("values", [])
+            for sprint in sprints:
+                if sprint.get("id") not in active_sprint_ids:
+                    active_sprint_ids.append(sprint["id"])
+                    logger.info(
+                        f"Found active sprint: {sprint['name']} (ID: {sprint['id']}) "
+                        f"on board ID {board['id']}"
                     )
-                    logger.warning(
-                        "Rate limited by Jira API (HTTP 429). "
-                        f"Retrying after {retry_after}s..."
-                    )
-                    time.sleep(retry_after)
-                    attempt += 1
-                    continue
-                sprint_response.raise_for_status()
-                sprints = sprint_response.json().get("values", [])
-                for sprint in sprints:
-                    if sprint.get("id") not in active_sprint_ids:
-                        active_sprint_ids.append(sprint["id"])
-                break  # Success, exit retry loop
-            except requests.exceptions.RequestException as e:
-                attempt += 1
-                if attempt < max_retries:
-                    logger.warning(
-                        f"Could not fetch sprints for board ID {board['id']} "
-                        f"(attempt {attempt}/{max_retries}). "
-                        f"Retrying in {retry_delay}s. "
-                        f"Error: {e}"
-                    )
-                    time.sleep(retry_delay)
-                else:
-                    logger.error(
-                        f"Could not fetch sprints for board ID {board['id']} "
-                        f"after {max_retries} attempts. Error: {e}"
-                    )
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Could not fetch sprints for board ID {board['id']}: {e}")
     return active_sprint_ids
 
 
@@ -166,7 +230,7 @@ def get_user_issues_in_sprints(base_url, api_token, usernames, sprint_ids):
     if not sprint_ids or not usernames:
         return []
 
-    search_url = f"{base_url}/rest/api/2/search"
+    search_api_path = "/rest/api/2/search"
     sprint_id_string = ", ".join(map(str, sprint_ids))
     # Build JQL for multiple users
     if len(usernames) == 1:
@@ -185,21 +249,16 @@ def get_user_issues_in_sprints(base_url, api_token, usernames, sprint_ids):
     logger.info("Querying for issues with JQL...")
     logger.debug(f"  > {jql}")
 
-    headers = {
-        "Authorization": f"Bearer {api_token}",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
-
     try:
-        response = requests.post(
-            search_url,
-            headers=headers,
-            data=json.dumps(payload),
-            timeout=30,
+        search_response = jira_query(
+            base_url,
+            search_api_path,
+            api_token,
+            method=requests.post,
+            json_payload=payload,
         )
-        response.raise_for_status()
-        issues = response.json().get("issues", [])
+        search_response.raise_for_status()
+        issues = search_response.json().get("issues", [])
         # Annotate each issue with the assignee for clarity
         for issue in issues:
             assignee = issue["fields"].get("assignee")
@@ -232,18 +291,20 @@ def add_comment_to_issue(base_url, api_token, issue_key, comment_body):
     Returns:
         bool: True if the comment was added successfully, False otherwise.
     """
-    comment_url = f"{base_url}/rest/api/2/issue/{issue_key}/comment"
+    comment_api_path = f"/rest/api/2/issue/{issue_key}/comment"
     payload = {"body": comment_body}
     logger.info(f"Adding comment to issue {issue_key}...")
-    headers = {
-        "Authorization": f"Bearer {api_token}",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
+
     try:
-        response = requests.post(comment_url, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-        if response.status_code == 201:
+        comment_response = jira_query(
+            base_url,
+            comment_api_path,
+            api_token,
+            method=requests.post,
+            json_payload=payload,
+        )
+        comment_response.raise_for_status()
+        if comment_response.status_code == 201:
             logger.info("Comment added successfully.")
             return True
     except requests.exceptions.RequestException as e:
@@ -265,15 +326,16 @@ def get_issue_transitions(base_url, api_token, issue_key):
     Returns:
         list[dict]: A list of available transition dictionaries.
     """
-    transitions_url = f"{base_url}/rest/api/2/issue/{issue_key}/transitions"
-    headers = {
-        "Authorization": f"Bearer {api_token}",
-        "Accept": "application/json",
-    }
+    transitions_api_path = f"/rest/api/2/issue/{issue_key}/transitions"
+
     try:
-        response = requests.get(transitions_url, headers=headers, timeout=30)
-        response.raise_for_status()
-        return response.json().get("transitions", [])
+        transitions_response = jira_query(
+            base_url,
+            transitions_api_path,
+            api_token,
+        )
+        transitions_response.raise_for_status()
+        return transitions_response.json().get("transitions", [])
     except requests.exceptions.RequestException as e:
         logger.error(f"Error getting transitions for {issue_key}: {e}")
         return []
@@ -292,19 +354,19 @@ def set_issue_transition(base_url, api_token, issue_key, transition_id):
     Returns:
         bool: True if successful, False otherwise.
     """
-    transitions_url = f"{base_url}/rest/api/2/issue/{issue_key}/transitions"
+    transitions_api_path = f"/rest/api/2/issue/{issue_key}/transitions"
     payload = {"transition": {"id": transition_id}}
-    headers = {
-        "Authorization": f"Bearer {api_token}",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
+
     try:
-        response = requests.post(
-            transitions_url, headers=headers, json=payload, timeout=30
+        transitions_response = jira_query(
+            base_url,
+            transitions_api_path,
+            api_token,
+            method=requests.post,
+            json_payload=payload,
         )
-        response.raise_for_status()
-        if response.status_code == 204:
+        transitions_response.raise_for_status()
+        if transitions_response.status_code == 204:
             logger.info(f"Issue {issue_key} status changed successfully.")
             return True
         return False
@@ -361,10 +423,11 @@ def get_multiline_comment():
     """
     print(
         "Enter your comment, ending with a new line. Press Ctrl+D (Linux/macOS) or "
-        "Ctrl+Z then Enter (Windows) to save."
+        "Ctrl+Z then Enter (Windows) to save.\n"
     )
     try:
         lines = sys.stdin.readlines()
+        print("\nSending comment...")
         return "".join(lines).strip()
     except KeyboardInterrupt:
         print("\nComment cancelled.")
@@ -425,34 +488,6 @@ def load_config(config_path):
         raise
 
 
-def check_jira_auth(jira_url, api_token):
-    """
-    Check if the provided Jira credentials are valid using Bearer token.
-
-    Args:
-        jira_url (str): The Jira instance URL.
-        api_token (str): The API token for authentication.
-
-    Returns:
-        bool: True if authentication is successful, False otherwise.
-    """
-    test_url = f"{jira_url.rstrip('/')}/rest/api/2/myself"
-    headers = {
-        "Authorization": f"Bearer {api_token}",
-        "Accept": "application/json",
-    }
-    try:
-        resp = requests.get(test_url, headers=headers, timeout=15)
-        if resp.status_code == 200:
-            return True
-        else:
-            logger.warning(f"Authentication failed: {resp.status_code} {resp.reason}")
-            return False
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error connecting to Jira: {e}")
-        return False
-
-
 def get_api_token_with_auth_check(service_name, keyring_user, jira_url):
     """
     Prompt for API token if needed and check authentication before proceeding.
@@ -467,6 +502,7 @@ def get_api_token_with_auth_check(service_name, keyring_user, jira_url):
     """
     from_keyring = False
     first_prompt = True
+    keyring_available = True
     while True:
         token = None
         try:
@@ -476,14 +512,14 @@ def get_api_token_with_auth_check(service_name, keyring_user, jira_url):
                 logger.info("API token found in secure storage.")
         except keyring.errors.NoKeyringError:
             logger.warning(
-                "`keyring` backend not found. Falling back to password prompt."
-            )
-            logger.warning(
+                "`keyring` backend not found."
                 "For secure storage, please install a backend "
                 "(e.g., 'pip install keyrings.cryptfile')"
             )
+            keyring_available = False
         except Exception as e:
             logger.error(f"An unexpected error occurred with keyring: {e}")
+            keyring_available = False
 
         if not token:
             if first_prompt:
@@ -496,76 +532,82 @@ def get_api_token_with_auth_check(service_name, keyring_user, jira_url):
                         "?selectedTab=com.atlassian.pats.pats-plugin:"
                         "jira-user-personal-access-tokens"
                     )
-                    print(
-                        "Tip: You can generate a Jira API token for this instance at: "
-                        f"{tip_url}"
-                    )
                 else:
-                    print(
-                        "Tip: You can generate a Jira API token at: "
+                    tip_url = (
                         "https://id.atlassian.com/manage-profile/security/api-tokens"
                     )
+                print(
+                    "Tip: You can generate a Jira API token for this instance at: "
+                    f"{tip_url}"
+                )
                 first_prompt = False
             try:
-                token = getpass.getpass("Enter your Jira API Token: ")
-                from_keyring = False
-                # Prompt to store the token in the keyring for future use
-                store = (
-                    input(
-                        "Store this API token in your system keyring for future use? "
-                        "(Y/n): "
-                    )
-                    .strip()
-                    .lower()
-                )
-                if store in ("", "y", "yes"):
-                    try:
-                        keyring.set_password(service_name, keyring_user, token)
-                        logger.info("API token stored securely in keyring.")
-                    except Exception as e:
-                        logger.error(f"Could not store token in keyring: {e}")
+                token = set_api_token(service_name, keyring_user, keyring_available)
             except Exception as e:
                 logger.critical(f"Could not read API token: {e}")
-                sys.exit(1)
+                raise
 
         # Check authentication
         if check_jira_auth(jira_url, token):
             logger.info("API authentication successful.")
             return token
-        else:
-            if from_keyring:
-                logger.critical("Stored API token is invalid. Please reset your token.")
-                sys.exit(1)
-            else:
-                logger.warning("Invalid API token. Please try again.\n")
+        if from_keyring:
+            raise Exception(
+                "Stored API token is invalid. Please reset your token using "
+                "--set-token or manually in your keyring."
+            )
+        logger.warning("Invalid API token. Please try again.\n")
 
 
-def set_api_token(service_name, user):
+def set_api_token(service_name, user, keyring_available=False, interactive=True):
     """
-    Prompts user for an API token and stores it in the system's keyring.
+    Prompts user for an API token and optionally stores it in the system's keyring.
 
     Args:
         service_name (str): The unique name for the service.
         user (str): The user key to associate with the token.
+        keyring_available (bool): Whether a keyring backend is available for storage.
     """
     print("Please enter the API token to store securely.")
     try:
         token = getpass.getpass("Enter your Jira API Token: ")
-        keyring.set_password(service_name, user, token)
-        logger.info(
-            f"Token stored successfully for user '{user}' in service "
-            f"'{service_name}'."
-        )
-        logger.info("You will not be prompted for it again on this machine.")
-        sys.exit(0)  # Exit after successfully setting the token.
+        # Only prompt to store if a backend is available.
+        if not keyring_available:
+            logger.info("Token will not be stored as no keyring backend is available.")
+            return token
+
+        if interactive:
+            store = (
+                input(
+                    "Store this API token in your system keyring for future use? "
+                    "(Y/n): "
+                )
+                .strip()
+                .lower()
+            )
+        else:
+            store = "y"  # Default to storing if not interactive
+
+        if store in ("", "y", "yes"):
+            keyring.set_password(service_name, user, token)
+            logger.info(
+                f"Token stored successfully for user '{user}' in service "
+                f"'{service_name}'."
+            )
+            logger.info("You will not be prompted for it again on this machine.")
+        else:
+            logger.info("Token will not be stored.")
+        return token
     except keyring.errors.NoKeyringError:
+        # This catch block is now less likely to be hit due to the check above,
+        # but it remains as a safeguard.
         logger.critical(
             "Could not store token because no `keyring` backend is available."
         )
-        sys.exit(1)
+        raise
     except Exception as e:
-        logger.critical(f"Could not store token: {e}")
-        sys.exit(1)
+        logger.critical(f"Could not get token: {e}")
+        raise
 
 
 # --- Main Execution ---
@@ -662,15 +704,29 @@ def main():
     if config is None:
         config = {}
 
-    if config_path_used:
-        logger.info(f"Loaded configuration from: {config_path_used}")
-    else:
-        logger.warning(
-            "No configuration file found. Using command-line arguments only."
-        )
-
     # Prioritize command-line args over config file values.
     jira_url = args.jira_url or config.get("jira_url")
+
+    # Create a unique service name for keyring based on the Jira URL.
+    service_name = f"jasper_script:{jira_url.rstrip('/')}"
+
+    # Use a fixed key for the token in the keyring
+    keyring_user = "jasper"
+
+    # Handle the --set-token action separately and exit immediately.
+    if args.set_token:
+        if not jira_url:
+            logger.critical(
+                "Cannot --set-token without a --jira-url or jira_url in config."
+            )
+            sys.exit(1)
+        try:
+            set_api_token(service_name, keyring_user, True, False)
+            sys.exit(0)
+        except Exception as e:
+            logger.critical(f"Failed to set API token: {e}")
+            sys.exit(1)
+
     # Read usernames from config if available, otherwise from command line
     usernames = args.usernames or config.get("usernames")
     if usernames is None:
@@ -697,18 +753,17 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    # Create a unique service name for keyring based on the Jira URL.
-    service_name = f"jasper_script:{jira_url.rstrip('/')}"
-
-    # Use a fixed key for the token in the keyring
-    keyring_user = "jasper"
-
-    # Handle the --set-token action separately.
-    if args.set_token:
-        set_api_token(service_name, keyring_user)
-
     # Authenticate with Jira and get the API token.
-    api_token = get_api_token_with_auth_check(service_name, keyring_user, jira_url)
+    try:
+        api_token = get_api_token_with_auth_check(service_name, keyring_user, jira_url)
+    except Exception as e:
+        logger.critical(f"Failed to authenticate with Jira: {e}")
+        print(
+            "Please run this script with --set-token to store your API token "
+            "or check your configuration.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # Determine if JASPER attribution should be added to comments.
     if args.no_jasper_attribution:
@@ -721,15 +776,18 @@ def main():
     # Fetch initial data: active sprints and issues.
     active_sprints = get_active_sprints(jira_url, api_token, board_ids=board_ids)
     if not active_sprints:
-        logger.warning("No active sprints found or an error occurred. Exiting.")
-        sys.exit(0)
+        logger.error("No active sprints found or an error occurred. Exiting.")
+        sys.exit(2)
     logger.info(f"Found {len(active_sprints)} active sprints.")
 
     # Query issues for all specified usernames and combine results
     issues = get_user_issues_in_sprints(jira_url, api_token, usernames, active_sprints)
     if not issues:
-        print(f"\nNo active sprint items found for users: {', '.join(usernames)}")
-        sys.exit(0)
+        print(
+            f"\nNo active sprint items found for users: {', '.join(usernames)}."
+            "Exiting."
+        )
+        sys.exit(2)
     display_issues(issues)
 
     # --- Main Interaction Loop ---
@@ -745,6 +803,12 @@ def main():
                 issues = get_user_issues_in_sprints(
                     jira_url, api_token, usernames, active_sprints
                 )
+                if not issues:
+                    print(
+                        "\nNo active sprint items found for users: "
+                        f"{', '.join(usernames)}. Exiting."
+                    )
+                    sys.exit(2)
                 display_issues(issues)
                 continue
 
@@ -767,7 +831,11 @@ def main():
                     "list, (q)uit: "
                 ).lower()
 
-                if action in ("b", "back"):
+                if action in ("q", "quit"):
+                    logger.info("Exiting.")
+                    sys.exit(0)
+
+                elif action in ("b", "back"):
                     display_issues(issues)
                     break
 
@@ -787,6 +855,7 @@ def main():
                         add_comment_to_issue(jira_url, api_token, issue_key, comment)
 
                 elif action in ("s", "status"):
+                    print("Getting available statuses...")
                     transitions = get_issue_transitions(jira_url, api_token, issue_key)
                     if not transitions:
                         logger.warning(
@@ -794,35 +863,29 @@ def main():
                         )
                         continue
 
-                    print("\nAvailable Statuses:")
-
-                    def closed_last(transitions):
-                        closed = [
-                            t for t in transitions if t["name"].lower() == "closed"
-                        ]
-                        not_closed = [
-                            t for t in transitions if t["name"].lower() != "closed"
-                        ]
-                        return not_closed + closed
-
-                    transitions_sorted = closed_last(transitions)
-                    for i, t in enumerate(transitions_sorted):
-                        print(f"  {i+1}: {t['name']}")
+                    closed_transitions = [
+                        t for t in transitions if t["name"].lower() == "closed"
+                    ]
+                    not_closed_transitions = [
+                        t for t in transitions if t["name"].lower() != "closed"
+                    ]
+                    transitions_sorted = not_closed_transitions + closed_transitions
 
                     while True:
+                        print("\nAvailable Statuses:")
+                        for i, t in enumerate(transitions_sorted):
+                            print(f"  {i+1}: {t['name']}")
                         trans_choice = input(
                             "\nEnter the number of the status to change to, or (b)ack, "
                             "or (q)uit: "
                         ).lower()
-                        if trans_choice in ("b", "back"):
-                            break
                         if trans_choice in ("q", "quit"):
                             logger.info("Exiting.")
                             sys.exit(0)
+                        if trans_choice in ("b", "back"):
+                            break
                         if not trans_choice.strip():
                             # Empty input: re-display the list of available statuses
-                            for i, t in enumerate(transitions_sorted):
-                                print(f"  {i+1}: {t['name']}")
                             continue
 
                         try:
@@ -832,25 +895,11 @@ def main():
                                 if set_issue_transition(
                                     jira_url, api_token, issue_key, transition_id
                                 ):
-                                    print(
-                                        "Status updated. Refresh to see changes.\n"
-                                        "\nAvailable Statuses:"
-                                    )
-                                    for i, t in enumerate(transitions_sorted):
-                                        print(f"  {i+1}: {t['name']}")
-                                    # Stay in the issue action sub-loop
+                                    print("Status updated. Refresh to see changes.\n")
                             else:
                                 print("Invalid transition number.")
-                                for i, t in enumerate(transitions_sorted):
-                                    print(f"  {i+1}: {t['name']}")
                         except ValueError:
                             print("Invalid input.")
-                            for i, t in enumerate(transitions_sorted):
-                                print(f"  {i+1}: {t['name']}")
-
-                elif action in ("q", "quit"):
-                    logger.info("Exiting.")
-                    sys.exit(0)
                 else:
                     print("Invalid action. Please choose from the options.")
         except ValueError:

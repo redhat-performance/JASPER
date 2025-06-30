@@ -60,7 +60,7 @@ class TestJasperMain(unittest.TestCase):
         """
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.json.return_value = {"values": [{"id": 42}]}
+        mock_resp.json.return_value = {"values": [{"id": 42, "name": "Sprint 42"}]}
         mock_get.return_value = mock_resp
         sprints = jasper_main.get_active_sprints(
             self.fake_jira_url, self.fake_api_token, self.fake_board_ids
@@ -79,7 +79,7 @@ class TestJasperMain(unittest.TestCase):
         resp_429.json.return_value = {}
         resp_200 = MagicMock()
         resp_200.status_code = 200
-        resp_200.json.return_value = {"values": [{"id": 99}]}
+        resp_200.json.return_value = {"values": [{"id": 99, "name": "Sprint 99"}]}
         # Provide enough responses for each board in fake_board_ids
         mock_get.side_effect = [resp_429, resp_200, resp_429, resp_200]
         sprints = jasper_main.get_active_sprints(
@@ -582,46 +582,60 @@ class TestJasperMain(unittest.TestCase):
             "No available status transitions for this issue."
         )
 
+    @patch("jasper.__main__.keyring")
     @patch("getpass.getpass", return_value="fake-token")
-    @patch("jasper.__main__.keyring.set_password")
+    @patch("builtins.input", return_value="y")
     @patch("sys.exit")
     @patch("argparse.ArgumentParser.parse_args")
     @patch("jasper.__main__.load_config")
     def test_main_set_token_flow(
-        self, mock_load_config, mock_args, mock_exit, mock_set_password, mock_getpass
+        self,
+        mock_load_config,
+        mock_args,
+        mock_exit,
+        mock_input,
+        mock_getpass,
+        mock_keyring,
     ):
         """Test the --set-token command-line argument flow."""
+
+        # Helper function to correctly simulate sys.exit with a code.
+        # This will raise the exception that the test expects.
+        def exit_with_code(code):
+            raise SystemExit(code)
+
         mock_args.return_value = MagicMock(
             config=None,
             jira_url="https://jira.example.com",
-            usernames=["user1"],
-            board_ids=[1],
-            set_token=True,  # Simulate --set-token flag
-            no_jasper_attribution=False,
+            set_token=True,
             verbose=0,
+            usernames=None,
+            board_ids=None,
         )
-        # We need to return a valid config, even if it's empty,
-        # to prevent the main() function from exiting early.
+
+        # Mock the return value of load_config to prevent FileNotFoundError
+        # This simulates a successful, empty config load.
         mock_load_config.return_value = ({}, "mock_path.yaml")
 
-        # Configure the mock to raise SystemExit, just like the real sys.exit()
-        mock_exit.side_effect = SystemExit(0)
+        # Configure the mock to prevent an AttributeError.
+        # The code being tested looks for `keyring.errors.NoKeyringError`.
+        # We must ensure that attribute path exists on the mock object.
+        mock_keyring.errors.NoKeyringError = keyring.errors.NoKeyringError
 
-        # The set_api_token function called by main() ends with sys.exit(0).
-        # We catch the SystemExit to allow the test to complete and make assertions.
+        # Assign the helper function as the side_effect for the mock.
+        mock_exit.side_effect = exit_with_code
+
         with self.assertRaises(SystemExit) as cm:
             jasper_main.main()
 
-        # Check that it exits with code 0 for success.
         self.assertEqual(cm.exception.code, 0)
 
-        # Verify that getpass was called to prompt for the token.
         mock_getpass.assert_called_once()
-        # Verify the token was stored correctly.
-        mock_set_password.assert_called_with(
+
+        # Assert that set_password was called on the mocked keyring object
+        mock_keyring.set_password.assert_called_with(
             "jasper_script:https://jira.example.com", "jasper", "fake-token"
         )
-        # Verify that the script tried to exit cleanly.
         mock_exit.assert_called_with(0)
 
     @patch(
@@ -638,7 +652,9 @@ class TestJasperMain(unittest.TestCase):
         """Test the flow when the keyring backend is not available."""
         get_api_token_with_auth_check("service", "user", self.fake_jira_url)
         mock_logger.warning.assert_any_call(
-            "`keyring` backend not found. Falling back to password prompt."
+            "`keyring` backend not found."
+            "For secure storage, please install a backend "
+            "(e.g., 'pip install keyrings.cryptfile')"
         )
 
     @patch("jasper.__main__.keyring.get_password", return_value=None)
@@ -691,8 +707,8 @@ class TestJasperMain(unittest.TestCase):
         with self.assertRaises(SystemExit) as cm:
             jasper_main.main()
 
-        self.assertEqual(cm.exception.code, 0)
-        mock_logger.warning.assert_called_with(
+        self.assertEqual(cm.exception.code, 2)
+        mock_logger.error.assert_called_with(
             "No active sprints found or an error occurred. Exiting."
         )
 
@@ -729,7 +745,7 @@ class TestJasperMain(unittest.TestCase):
         with self.assertRaises(SystemExit) as cm:
             jasper_main.main()
 
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(cm.exception.code, 2)
         self.assertIn("No active sprint items found", mock_stdout.getvalue())
 
     @patch("argparse.ArgumentParser.parse_args")
