@@ -21,3 +21,7 @@ jasper_attribution: true
 # Set to true to enable Gemini comment assistance.
 # You will be prompted to securely store your Gemini API key on first run.
 enable_gemini: false
+
+# Optionally, specify a Gemini model. Defaults to 'gemini-1.5-flash'.
+# gemini:
+#   model_name: "gemini-1.5-pro"

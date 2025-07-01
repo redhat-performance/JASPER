@@ -53,6 +53,7 @@ from prompt_toolkit.patch_stdout import patch_stdout
 logger = logging.getLogger("JASPER")
 
 DEFAULT_ATTRIBUTION = True
+DEFAULT_GEMINI_MODEL = "gemini-1.5-flash"
 
 
 # --- Custom Formatter for Color-coded Logs ---
@@ -407,13 +408,14 @@ def set_issue_transition(base_url: str, api_token: str, issue_key: str, transiti
 
 # --- Gemini AI Functions ---
 
-def check_gemini_auth(api_key: str) -> bool:
+def check_gemini_auth(api_key: str, model_name: str) -> bool:
     """
     Checks if the provided Gemini API key is valid by making a small,
     authenticated API call.
 
     Args:
         api_key: The Gemini API key.
+        model_name: The Gemini model to use for validation.
 
     Returns:
         True if the key is valid, False otherwise.
@@ -421,9 +423,9 @@ def check_gemini_auth(api_key: str) -> bool:
     if not api_key:
         return False
     try:
-        logger.debug("Attempting to validate Gemini API key...")
+        logger.debug(f"Attempting to validate Gemini API key with model '{model_name}'...")
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel(model_name)
         model.generate_content("test", generation_config={"max_output_tokens": 1})
         logger.info("Gemini API key is valid.")
         return True
@@ -435,12 +437,13 @@ def check_gemini_auth(api_key: str) -> bool:
         return False
 
 
-def get_gemini_suggestion(api_key: str, issue_details: Dict[str, Any], comments: List[Dict[str, Any]], partial_comment: str) -> Optional[str]:
+def get_gemini_suggestion(api_key: str, model_name: str, issue_details: Dict[str, Any], comments: List[Dict[str, Any]], partial_comment: str) -> Optional[str]:
     """
     Gets a comment suggestion from the Gemini API.
 
     Args:
         api_key: The Gemini API key.
+        model_name: The Gemini model to use.
         issue_details: The details of the Jira issue.
         comments: A list of existing comments on the issue.
         partial_comment: The user's partially typed comment.
@@ -453,7 +456,7 @@ def get_gemini_suggestion(api_key: str, issue_details: Dict[str, Any], comments:
 
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel(model_name)
 
         prompt = (
             "You are a helpful assistant for writing Jira comments. "
@@ -549,6 +552,7 @@ class GeminiSuggester(AutoSuggest):
         suggestion_text = await asyncio.to_thread(
             get_gemini_suggestion,
             self.gemini_config["api_key"],
+            self.gemini_config["model_name"],
             self.issue_details,
             self.comments,
             buffer.text,
@@ -816,6 +820,9 @@ def process_issue_actions(issue: Dict[str, Any], jira_url: str, api_token: str, 
                     get_multiline_comment_async(jira_url, api_token, issue_key, gemini_config)
                 )
                 if comment:
+                    if gemini_config.get("is_valid"):
+                        model_name = gemini_config.get("model_name", DEFAULT_GEMINI_MODEL)
+                        comment += f"\n\n_Comment assisted by Gemini ({model_name})._"
                     if jasper_attribution:
                         comment += "\n\nComment added via JASPER: https://github.com/redhat-performance/JASPER"
                     add_comment_to_issue(jira_url, api_token, issue_key, comment)
@@ -957,9 +964,12 @@ def main():
     gemini_config = {"enabled": gemini_enabled, "is_valid": False}
     if gemini_enabled:
         logger.info("Gemini AI is enabled in config. Checking for API key...")
+        model_name = config.get("gemini", {}).get("model_name", DEFAULT_GEMINI_MODEL)
+        gemini_config["model_name"] = model_name
         try:
             gemini_api_key = get_api_token(
-                gemini_service_name, "gemini_api_key", "Gemini API Key", check_gemini_auth
+                gemini_service_name, "gemini_api_key", "Gemini API Key",
+                lambda token: check_gemini_auth(api_key=token, model_name=model_name)
             )
             gemini_config["api_key"] = gemini_api_key
             gemini_config["is_valid"] = True
