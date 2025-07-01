@@ -46,7 +46,7 @@ directory (or you can specify a file location with `--config`). Example:
 
 ```yaml
 # Your full Jira instance URL
-jira_url: "https://your-company.atlassian.net"
+jira_url: "[https://your-company.atlassian.net](https://your-company.atlassian.net)"
 
 # One or more Jira usernames/account IDs to query for assigned issues
 usernames:
@@ -63,6 +63,12 @@ board_ids:
 
 # Set to false to disable JASPER attribution in comments
 jasper_attribution: true
+
+# --- Gemini AI Integration (Optional) ---
+gemini:
+  # Set to true to enable Gemini comment assistance.
+  # You will be prompted to securely store your Gemini API key on first run.
+  enabled: false
 ```
 
 ---
@@ -95,6 +101,7 @@ jasper_attribution: true
   (overrides config)
 - `--board-ids`: Space-separated list of Jira board IDs to check (overrides config)
 - `--set-token`: Store the Jira API token securely in the system's keyring and exit
+- `--set-gemini-token`: Store the Gemini API key securely in the system's keyring and exit
 - `--no-jasper-attribution`: Do not add JASPER attribution to comments (overrides config)
 - `--help`: Show all options
 - `-v/-vv`: Show INFO/DEBUG log messages
@@ -103,10 +110,10 @@ jasper_attribution: true
 
 ## Authentication & API Token Storage
 
-JASPER uses a Jira API token for authentication. The token is stored securely using
-your system keyring. The keyring entry is scoped to your Jira instance and a fixed key
-("jasper"), so only one token per Jira instance is stored.
+JASPER uses API tokens for authentication with both Jira and Gemini. The tokens are
+stored securely using your system's keyring.
 
+### Jira API Token
 You can add your Jira API token to the keyring securely once, and it will be available
 for all future runs of JASPER.
 
@@ -114,16 +121,18 @@ for all future runs of JASPER.
 jasper --set-token
 ```
 
-- If, when running JASPER, no token is found in the keyring, you will be prompted to
-  enter one.
-- You will also be asked if you want to store the token in your keyring for future use.
+### Gemini API Token
+To use the AI-powered comment assistance, you must first store your Gemini API key.
+
+```sh
+jasper --set-gemini-token
+```
 
 > [!NOTE]
-> To create a Jira API token, go to your Jira Data Center profile and look for
-> "Personal Access Tokens" under your profile or account settings.  
-> For example, visit:  
-> `https://your-jira.example.com/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens`  
-> If you do not see this option, contact your Jira administrator.
+> - To create a **Jira API token**, go to your Jira profile and look for "Personal
+>   Access Tokens".
+> - To create a **Gemini API key**, visit
+>   [Google AI Studio](https://aistudio.google.com/).
 
 ---
 
@@ -140,7 +149,7 @@ jasper --config /path/to/jasper_config.yaml
 Or, to specify options on the command line (these will override config file options):
 
 ```sh
-jasper --jira-url "https://your-company.atlassian.net" \
+jasper --jira-url "[https://your-company.atlassian.net](https://your-company.atlassian.net)" \
   --usernames user1 user2 \
   --board-ids 10 25 42
 ```
@@ -155,27 +164,24 @@ After starting JASPER, you will see a numbered list of your active sprint issues
 
 You can interact with the tool using the following options:
 
-- **Select an issue:**  
-  Enter the number of an issue to select it for further actions.
+- **Select an issue:** Enter the number of an issue to select it for further actions.
 
-- **(r)efresh the issue list:**  
-  Enter `r` or `refresh` to reload the list of issues.
+- **(r)efresh the issue list:** Enter `r` or `refresh` to reload the list of issues.
 
-- **(q)uit:**  
-  Enter `q` or `quit` to exit the program.
+- **(q)uit:** Enter `q` or `quit` to exit the program.
 
 ```console
 JASPER is starting...
 
 --- Active Sprint Items ---
   1: [PROJECT-7760] Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed accumsan porta sem. (Status: In Progress, Priority: Normal) (Assignee: bar@example.com)
-      URL: https://your-company.atlassian.net/browse/PROJECT-7760
+      URL: [https://your-company.atlassian.net/browse/PROJECT-7760](https://your-company.atlassian.net/browse/PROJECT-7760)
   2: [PROJECT-29981] Phasellus malesuada aliquet lacus a pharetra. Aliquam erat volutpat. (Status: In Progress, Priority: Critical) (Assignee: foo@example.com)
-      URL: https://your-company.atlassian.net/browse/PROJECT-29981
+      URL: [https://your-company.atlassian.net/browse/PROJECT-29981](https://your-company.atlassian.net/browse/PROJECT-29981)
   3: [PROJECT-27400] Etiam turpis lacus, vestibulum ac mauris et, pellentesque bibendum ante. (Status: New, Priority: Major) (Assignee: foo@example.com)
-      URL: https://your-company.atlassian.net/browse/PROJECT-27400
+      URL: [https://your-company.atlassian.net/browse/PROJECT-27400](https://your-company.atlassian.net/browse/PROJECT-27400)
   4: [PROJECT-30477] Suspendisse egestas risus id ligula facilisis pharetra. (Status: In Progress, Priority: Undefined) (Assignee: bar@example.com)
-      URL: https://your-company.atlassian.net/browse/PROJECT-30477
+      URL: [https://your-company.atlassian.net/browse/PROJECT-30477](https://your-company.atlassian.net/browse/PROJECT-30477)
 ---------------------------
 
 Enter an issue number to select, (r)efresh, or (q)uit: 
@@ -183,22 +189,16 @@ Enter an issue number to select, (r)efresh, or (q)uit:
 
 When you select an issue, you will be prompted with additional actions:
 
-- **(c)omment:**  
-  Add a comment to the selected issue. You can enter a multi-line comment, ending with
-  a new line and Ctrl+D (Linux/macOS) or Ctrl+Z then Enter (Windows).
+- **(c)omment:** Add a comment to the selected issue. To submit the comment, press the `Esc` key followed by the `Enter` key. If Gemini is enabled, you will get real-time "ghost text" suggestions as you type. Press `Tab` to accept a suggestion.
 
-- **Update (s)tatus:**  
-  Change the status of the selected issue. You will be shown available transitions and
+- **Update (s)tatus:** Change the status of the selected issue. You will be shown available transitions and
   can select one by number.
 
-- **(o)pen in browser:**  
-  Open the selected issue in your default web browser.
+- **(o)pen in browser:** Open the selected issue in your default web browser.
 
-- **(b)ack to list:**  
-  Return to the main issue list.
+- **(b)ack to list:** Return to the main issue list.
 
-- **(q)uit:**  
-  Exit the program from the issue action menu.
+- **(q)uit:** Exit the program from the issue action menu.
 
 ```console
 Selected: [PROJECT-7760] Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed accumsan porta sem.
@@ -217,7 +217,7 @@ By default, JASPER will append the following plain text attribution to each comm
 adds:
 
 ```
-Comment added via JASPER: https://github.com/redhat-performance/JASPER
+Comment added via JASPER: [https://github.com/redhat-performance/JASPER](https://github.com/redhat-performance/JASPER)
 ```
 
 You can disable this globally by setting `jasper_attribution: false` in your

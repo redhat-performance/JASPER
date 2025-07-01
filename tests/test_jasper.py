@@ -11,7 +11,7 @@ License: Apache License, Version 2.0
 """
 
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import os
 import json
 import io
@@ -20,6 +20,7 @@ import logging
 import requests
 import yaml
 import keyring.errors
+import asyncio
 
 import jasper.__main__ as jasper_main
 from jasper.__main__ import get_api_token_with_auth_check
@@ -51,6 +52,10 @@ class TestJasperMain(unittest.TestCase):
                 "_jasper_assignee": "example_user",
             }
         ]
+        self.gemini_config = {
+            "enabled": True,
+            "api_key": "fake-gemini-key"
+        }
 
     @patch("jasper.__main__.keyring")
     @patch("jasper.__main__.requests.get")
@@ -83,7 +88,7 @@ class TestJasperMain(unittest.TestCase):
         # Provide enough responses for each board in fake_board_ids
         mock_get.side_effect = [resp_429, resp_200, resp_429, resp_200]
         sprints = jasper_main.get_active_sprints(
-            self.fake_jira_url, self.fake_api_token, self.fake_board_ids
+            self.fake_jira_url, self.fake_api_token, self.fake_board_ids, retry_delay=0
         )
         self.assertEqual(sprints, [99])
 
@@ -314,6 +319,87 @@ class TestJasperMain(unittest.TestCase):
         self.assertEqual(len(issues), 1)
         sent_payload = json.loads(mock_post.call_args.kwargs["data"])
         self.assertIn('assignee = "user1"', sent_payload["jql"])
+        
+    # --- Gemini AI Tests ---
+
+    @patch("jasper.__main__.genai")
+    def test_check_gemini_auth_success(self, mock_genai):
+        """Test check_gemini_auth returns True on success."""
+        mock_genai.list_models.return_value = [MagicMock()] # Simulate a successful response
+        self.assertTrue(jasper_main.check_gemini_auth("valid-key"))
+        mock_genai.configure.assert_called_with(api_key="valid-key")
+
+    @patch("jasper.__main__.genai")
+    def test_check_gemini_auth_failure(self, mock_genai):
+        """Test check_gemini_auth returns False on failure."""
+        mock_genai.list_models.side_effect = Exception("Invalid API Key")
+        self.assertFalse(jasper_main.check_gemini_auth("invalid-key"))
+
+    @patch("jasper.__main__.genai.GenerativeModel")
+    def test_get_gemini_suggestion_success(self, mock_generative_model):
+        """Test get_gemini_suggestion returns a suggestion on success."""
+        mock_model_instance = MagicMock()
+        mock_model_instance.generate_content.return_value = MagicMock(text=" a test suggestion")
+        mock_generative_model.return_value = mock_model_instance
+
+        suggestion = jasper_main.get_gemini_suggestion(
+            "fake-api-key",
+            {"key": "PROJ-123", "fields": {"summary": "Test"}},
+            [],
+            "This is"
+        )
+        self.assertEqual(suggestion, "a test suggestion")
+
+    @patch("jasper.__main__.genai.GenerativeModel")
+    def test_get_gemini_suggestion_failure(self, mock_generative_model):
+        """Test get_gemini_suggestion returns None on API error."""
+        mock_model_instance = MagicMock()
+        mock_model_instance.generate_content.side_effect = Exception("API Error")
+        mock_generative_model.return_value = mock_model_instance
+
+        suggestion = jasper_main.get_gemini_suggestion(
+            "fake-api-key",
+            {"key": "PROJ-123", "fields": {"summary": "Test"}},
+            [],
+            "This is"
+        )
+        self.assertIsNone(suggestion)
+
+    @patch('jasper.__main__.PromptSession')
+    def test_get_multiline_comment_async_gemini_enabled(self, mock_prompt_session):
+        """Test the async comment function uses GeminiSuggester when enabled."""
+        mock_session_instance = MagicMock()
+        mock_session_instance.prompt_async = AsyncMock(return_value="User comment")
+        mock_prompt_session.return_value = mock_session_instance
+        
+        config = {"enabled": True, "is_valid": True, "api_key": "fake-key"}
+        
+        asyncio.run(jasper_main.get_multiline_comment_async(
+            self.fake_jira_url, self.fake_api_token, self.fake_issue_key, config
+        ))
+
+        mock_prompt_session.assert_called_once()
+        _, kwargs = mock_prompt_session.call_args
+        self.assertIn('auto_suggest', kwargs)
+        self.assertIsInstance(kwargs['auto_suggest'], jasper_main.GeminiSuggester)
+
+    @patch('jasper.__main__.PromptSession')
+    def test_get_multiline_comment_async_gemini_disabled(self, mock_prompt_session):
+        """Test the async comment function falls back when Gemini is disabled."""
+        mock_session_instance = MagicMock()
+        mock_session_instance.prompt_async = AsyncMock(return_value="User comment")
+        mock_prompt_session.return_value = mock_session_instance
+        
+        config = {"enabled": False, "is_valid": False}
+
+        asyncio.run(jasper_main.get_multiline_comment_async(
+            self.fake_jira_url, self.fake_api_token, self.fake_issue_key, config
+        ))
+
+        mock_prompt_session.assert_called_once()
+        _, kwargs = mock_prompt_session.call_args
+        self.assertNotIn('auto_suggest', kwargs)
+
 
     # --- main() Function Tests ---
 
@@ -404,10 +490,11 @@ class TestJasperMain(unittest.TestCase):
     @patch("argparse.ArgumentParser.parse_args")
     @patch("jasper.__main__.load_config")
     @patch("jasper.__main__.get_api_token_with_auth_check", return_value="fake-token")
+    @patch("jasper.__main__.check_gemini_auth", return_value=True)
     @patch("jasper.__main__.get_active_sprints", return_value=[100])
     @patch("jasper.__main__.get_user_issues_in_sprints")
     @patch("jasper.__main__.add_comment_to_issue")
-    @patch("jasper.__main__.get_multiline_comment", return_value="Test comment")
+    @patch("jasper.__main__.get_multiline_comment_async", new_callable=AsyncMock)
     @patch("builtins.input", side_effect=["1", "c", "b", "q"])
     def test_main_action_add_comment(
         self,
@@ -416,6 +503,7 @@ class TestJasperMain(unittest.TestCase):
         mock_add_comment,
         mock_get_issues,
         mock_sprints,
+        mock_check_gemini,
         mock_token,
         mock_config,
         mock_args,
@@ -435,10 +523,13 @@ class TestJasperMain(unittest.TestCase):
                 "jira_url": self.fake_jira_url,
                 "usernames": ["example_user"],
                 "board_ids": self.fake_board_ids,
+                "gemini": self.gemini_config
             },
             "c.yaml",
         )
         mock_get_issues.return_value = self.mock_issue_list
+        mock_get_comment.return_value = "Test comment"
+
 
         jasper_main.main()
 
@@ -669,14 +760,18 @@ class TestJasperMain(unittest.TestCase):
         self.assertEqual(token, "valid-token")
         self.assertEqual(mock_getpass.call_count, 2)
 
-    @patch("sys.stdin")
     @patch("sys.stdout", new_callable=io.StringIO)
-    def test_get_multiline_comment_keyboard_interrupt(self, mock_stdout, mock_stdin):
-        """Test that get_multiline_comment handles KeyboardInterrupt gracefully."""
+    @patch("jasper.__main__.PromptSession")
+    def test_get_multiline_comment_keyboard_interrupt(self, mock_prompt_session, mock_stdout):
+        """Test that get_multiline_comment_async handles KeyboardInterrupt gracefully."""
         # Simulate Ctrl+C during input
-        mock_stdin.readlines.side_effect = KeyboardInterrupt
+        mock_session_instance = MagicMock()
+        mock_session_instance.prompt_async = AsyncMock(side_effect=KeyboardInterrupt)
+        mock_prompt_session.return_value = mock_session_instance
 
-        comment = jasper_main.get_multiline_comment()
+        comment = asyncio.run(jasper_main.get_multiline_comment_async(
+            self.fake_jira_url, self.fake_api_token, self.fake_issue_key, self.gemini_config
+        ))
 
         self.assertIsNone(comment)
         self.assertIn("Comment cancelled.", mock_stdout.getvalue())
