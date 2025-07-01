@@ -64,11 +64,9 @@ board_ids:
 # Set to false to disable JASPER attribution in comments
 jasper_attribution: true
 
-# --- Gemini AI Integration (Optional) ---
-gemini:
-  # Set to true to enable Gemini comment assistance.
-  # You will be prompted to securely store your Gemini API key on first run.
-  enabled: false
+# Set to true to enable Gemini comment assistance.
+# You will be prompted to securely store your Gemini API key on first run.
+enable_gemini: false
 ```
 
 ---

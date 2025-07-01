@@ -953,14 +953,13 @@ def main():
         logger.critical(f"Failed to authenticate with Jira: {e}")
         sys.exit(1)
 
-    gemini_config = config.get("gemini", {})
-    gemini_config["is_valid"] = False
-    if gemini_config.get("enabled"):
+    gemini_enabled = config.get("enable_gemini", False)
+    gemini_config = {"enabled": gemini_enabled, "is_valid": False}
+    if gemini_enabled:
         logger.info("Gemini AI is enabled in config. Checking for API key...")
         try:
             gemini_api_key = get_api_token(
-                gemini_service_name, "gemini_api_key", "Gemini API Key",
-                lambda token: check_gemini_auth(api_key=token)
+                gemini_service_name, "gemini_api_key", "Gemini API Key", check_gemini_auth
             )
             gemini_config["api_key"] = gemini_api_key
             gemini_config["is_valid"] = True
