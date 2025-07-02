@@ -1,0 +1,18 @@
+# Your full Jira instance URL
+jira_url: "https://your-company.atlassian.net"
+
+# The Jira Account IDs or usernames to use for queries
+usernames:
+  - "your.jira.username"
+  - "foo@example.com"
+
+# A list of board IDs to search within.
+# To find board IDs: In Jira, open your board in the browser. The board ID is the
+# number in the URL after "rapidView=" (e.g., ...RapidBoard.jspa?rapidView=42).
+board_ids:
+  - 10
+  - 25
+  - 42
+
+# (Optional, default = true) Set to false to disable JASPER attribution in comments
+jasper_attribution: true

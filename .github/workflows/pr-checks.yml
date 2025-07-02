@@ -1,0 +1,93 @@
+name: PR Checks
+
+on:
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 coverage
+
+      - name: Install project (for importable jasper module)
+        run: |
+          pip install .
+
+      - name: Run flake8 linting
+        run: |
+          flake8 jasper
+
+      - name: Run unit tests with coverage
+        run: |
+          coverage run -m unittest discover tests/
+          coverage report
+          coverage xml
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+      - name: Show coverage summary
+        run: |
+          coverage report
+
+      - name: Add coverage summary to GitHub summary
+        run: |
+          # First, generate the coverage report in JSON format
+          coverage json
+
+          # Start the HTML table and add the header row
+          echo '### Coverage Report' >> $GITHUB_STEP_SUMMARY
+          echo '<table>' >> $GITHUB_STEP_SUMMARY
+          echo '<tr>' >> $GITHUB_STEP_SUMMARY
+          echo '<th>File</th>' >> $GITHUB_STEP_SUMMARY
+          echo '<th>Stmts</th>' >> $GITHUB_STEP_SUMMARY
+          echo '<th>Miss</th>' >> $GITHUB_STEP_SUMMARY
+          echo '<th>Cover</th>' >> $GITHUB_STEP_SUMMARY
+          echo '</tr>' >> $GITHUB_STEP_SUMMARY
+
+          # Use jq to parse the JSON and create a table row for each file
+          jq -r '.files | to_entries[] | "<tr><td>\(.key)</td><td>\(.value.summary.num_statements)</td><td>\(.value.summary.missing_lines)</td><td>\(.value.summary.percent_covered | round)%</td></tr>"' coverage.json >> $GITHUB_STEP_SUMMARY
+          
+          # Add the TOTAL row at the end
+          jq -r '.totals | "<tr><td><b>TOTAL</b></td><td><b>\(.num_statements)</b></td><td><b>\(.missing_lines)</b></td><td><b>\(.percent_covered | round)%</b></td></tr>"' coverage.json >> $GITHUB_STEP_SUMMARY
+
+          # Close the table
+          echo '</table>' >> $GITHUB_STEP_SUMMARY
+
+      - name: Check if version was updated
+        id: version_check
+        run: |
+          # Get the base and head commit for the PR
+          git fetch origin ${{ github.base_ref }} --depth=1
+          # Check if pyproject.toml was changed in the PR
+          if git diff --name-only origin/${{ github.base_ref }} | grep -q '^pyproject.toml$'; then
+            # Check if the version line was changed
+            if git diff origin/${{ github.base_ref }} -- pyproject.toml | grep -E '^\+version ?='; then
+              echo "Version was updated in pyproject.toml."
+              echo "version_updated=true" >> $GITHUB_OUTPUT
+            else
+              echo "::warning file=pyproject.toml::pyproject.toml was changed, but version was not updated."
+              echo "version_updated=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            # If pyproject.toml was not changed, check if there are other changes in the PR
+            if git diff --name-only origin/${{ github.base_ref }} | grep -vq '^pyproject.toml$'; then
+              echo "::warning file=pyproject.toml::pyproject.toml version was not updated in this PR. Please consider updating the version if this is a significant change."
+              echo "version_updated=false" >> $GITHUB_OUTPUT
+            fi
+          fi
