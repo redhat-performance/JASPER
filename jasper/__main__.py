@@ -145,7 +145,7 @@ def jira_query(
                 time.sleep(retry_delay)
             else:
                 raise
-    return []
+    return None
 
 
 def check_jira_auth(base_url, api_token):
@@ -179,7 +179,7 @@ def check_jira_auth(base_url, api_token):
         return False
 
 
-def get_active_sprints(base_url, api_token, board_ids, **kwargs):
+def get_active_sprints(base_url, api_token, board_ids):
     """
     Fetch active sprints from specified boards.
 
@@ -319,6 +319,33 @@ def add_comment_to_issue(base_url, api_token, issue_key, comment_body):
     return False
 
 
+def get_last_issue_comment(base_url, api_token, issue_key):
+    """
+    Get the most recent comment for a Jira issue.
+
+    Args:
+        base_url (str): The base URL of the Jira instance.
+        api_token (str): The API token for authentication.
+        issue_key (str): The key of the issue.
+
+    Returns:
+        dict or None: The last comment dictionary, or None if no comments exist.
+    """
+    comments_api_path = (
+        f"/rest/api/2/issue/{issue_key}/comment?orderBy=-created&maxResults=1"
+    )
+    try:
+        comments_response = jira_query(base_url, comments_api_path, api_token)
+        if comments_response:
+            comments_response.raise_for_status()
+            comments = comments_response.json().get("comments", [])
+            if comments:
+                return comments[0]
+    except requests.exceptions.RequestException as e:
+        logger.error("Error getting last comment for %s: %s", issue_key, e)
+    return None
+
+
 def get_issue_transitions(base_url, api_token, issue_key):
     """
     Get available status transitions for a Jira issue.
@@ -380,29 +407,6 @@ def set_issue_transition(base_url, api_token, issue_key, transition_id):
         if hasattr(e, "response") and e.response is not None:
             logger.debug(f"Response Body: {e.response.text}")
         return False
-
-
-def get_issue_comments(base_url, api_token, issue_key):
-    """
-    Get all comments for a Jira issue.
-
-    Args:
-        base_url (str): The base URL of the Jira instance.
-        api_token (str): The API token for authentication.
-        issue_key (str): The key of the issue.
-
-    Returns:
-        list[dict]: A list of comment dictionaries, sorted oldest to newest.
-    """
-    comments_api_path = f"/rest/api/2/issue/{issue_key}/comment"
-    try:
-        comments_response = jira_query(base_url, comments_api_path, api_token)
-        if comments_response:
-            comments_response.raise_for_status()
-            return comments_response.json().get("comments", [])
-    except requests.exceptions.RequestException as e:
-        logger.error("Error getting comments for %s: %s", issue_key, e)
-    return []
 
 
 # --- UI & Interaction Functions ---
@@ -895,9 +899,8 @@ def process_issue_actions(
                 logger.error("Failed to get comment: %s", e)
         elif action in ("l", "last"):
             print("\nFetching last comment...")
-            comments = get_issue_comments(jira_url, api_token, issue_key)
-            if comments:
-                last_comment = comments[-1]
+            last_comment = get_last_issue_comment(jira_url, api_token, issue_key)
+            if last_comment:
                 author = last_comment["author"]["displayName"]
                 created_raw = last_comment["created"]
                 created = created_raw.split("T")[0]
