@@ -41,7 +41,6 @@ import yaml
 import yaml.parser
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
-from prompt_toolkit.patch_stdout import patch_stdout
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Initialize logger
@@ -455,12 +454,11 @@ async def get_multiline_comment_async() -> Optional[str]:
         history=InMemoryHistory(),
     )
 
-    with patch_stdout():
-        try:
-            return await session.prompt_async()
-        except (EOFError, KeyboardInterrupt):
-            print("\nComment cancelled.")
-            return None
+    try:
+        return await session.prompt_async()
+    except (EOFError, KeyboardInterrupt):
+        print("\nComment cancelled.")
+        return None
 
 
 # --- Configuration & Token Management ---
