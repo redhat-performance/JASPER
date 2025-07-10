@@ -47,6 +47,7 @@ import google.generativeai as genai
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.patch_stdout import patch_stdout
 
 # Initialize logger
@@ -533,10 +534,11 @@ class GeminiSuggester(AutoSuggest):
         self.issue_details: Optional[Dict[str, Any]] = None
         self.comments: Optional[List[Dict[str, Any]]] = None
 
-    async def get_suggestion_async(self, session: PromptSession, buffer: Any) -> Optional[Suggestion]:
+    async def get_suggestion_async(self, buffer: Any, document: Any) -> Optional[Suggestion]:
         await asyncio.sleep(0.5)  # Debounce
 
-        if buffer.text != session.default_buffer.text:
+        # If the buffer text has changed since the suggestion was requested, abort.
+        if document.text != buffer.text:
             return None
 
         if not self.issue_details:
@@ -555,12 +557,12 @@ class GeminiSuggester(AutoSuggest):
             self.gemini_config["model_name"],
             self.issue_details,
             self.comments,
-            buffer.text,
+            document.text,
         )
 
-        if suggestion_text and suggestion_text.lower().strip() != buffer.text.lower().strip():
-            if suggestion_text.lower().startswith(buffer.text.lower()):
-                return Suggestion(suggestion_text[len(buffer.text):])
+        if suggestion_text and suggestion_text.lower().strip() != document.text.lower().strip():
+            if suggestion_text.lower().startswith(document.text.lower()):
+                return Suggestion(suggestion_text[len(document.text):])
         return None
 
     def get_suggestion(self, buffer: Any, document: Any) -> Optional[Suggestion]:
@@ -573,21 +575,33 @@ async def get_multiline_comment_async(base_url: str, api_token: str, issue_key: 
     """
     use_gemini = gemini_config.get("enabled") and gemini_config.get("is_valid")
 
+    suggester = None
+    bindings = None
     if use_gemini:
         print(
             "Enter your comment. A suggestion will appear as you type.\n"
             "Press Tab to accept. To submit, press Esc and then Enter."
         )
-        suggester: Optional[GeminiSuggester] = GeminiSuggester(base_url, api_token, issue_key, gemini_config)
+        suggester = GeminiSuggester(base_url, api_token, issue_key, gemini_config)
+        
+        bindings = KeyBindings()
+        @bindings.add("tab")
+        def _(event):
+            """Accept suggestion on Tab. Otherwise, insert spaces for indentation."""
+            buffer = event.app.current_buffer
+            if buffer.suggestion:
+                buffer.insert_text(buffer.suggestion.text)
+            else:
+                buffer.insert_text("    ")
     else:
         print("Enter your comment. To submit, press Esc and then Enter.")
-        suggester = None
         
     session = PromptSession(
         "Comment: ",
         multiline=True,
         auto_suggest=suggester,
         history=InMemoryHistory(),
+        key_bindings=bindings,
     )
 
     with patch_stdout():
