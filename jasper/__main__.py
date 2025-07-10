@@ -382,6 +382,29 @@ def set_issue_transition(base_url, api_token, issue_key, transition_id):
         return False
 
 
+def get_issue_comments(base_url, api_token, issue_key):
+    """
+    Get all comments for a Jira issue.
+
+    Args:
+        base_url (str): The base URL of the Jira instance.
+        api_token (str): The API token for authentication.
+        issue_key (str): The key of the issue.
+
+    Returns:
+        list[dict]: A list of comment dictionaries, sorted oldest to newest.
+    """
+    comments_api_path = f"/rest/api/2/issue/{issue_key}/comment"
+    try:
+        comments_response = jira_query(base_url, comments_api_path, api_token)
+        if comments_response:
+            comments_response.raise_for_status()
+            return comments_response.json().get("comments", [])
+    except requests.exceptions.RequestException as e:
+        logger.error("Error getting comments for %s: %s", issue_key, e)
+    return []
+
+
 # --- UI & Interaction Functions ---
 
 
@@ -418,7 +441,10 @@ def display_issues(issues: List[Dict[str, Any]]):
 
 async def get_multiline_comment_async() -> Optional[str]:
     """Get multi-line input using prompt_toolkit for a better experience."""
-    print("Enter your comment. To submit, press Esc and then Enter.")
+    print(
+        "Enter your comment. To submit, press Esc and then Enter. To cancel, press "
+        "Ctrl+C or Ctrl+D.\n"
+    )
     session = PromptSession(
         "Comment: ",
         multiline=True,
@@ -841,8 +867,8 @@ def process_issue_actions(
     while True:
         print(f"\nSelected: [{issue_key}] {issue['fields']['summary']}")
         action = input(
-            "Action: (c)omment, update (s)tatus, (o)pen in browser, (b)ack to list, "
-            "(q)uit: "
+            "Action: (c)omment, change (s)tatus, show (l)ast comment, "
+            "(o)pen in browser, (b)ack, (q)uit: "
         ).lower()
 
         if action in ("q", "quit"):
@@ -863,9 +889,26 @@ def process_issue_actions(
                             "\n\nComment added via JASPER: "
                             "https://github.com/redhat-performance/JASPER"
                         )
-                    add_comment_to_issue(jira_url, api_token, issue_key, comment)
+                    if add_comment_to_issue(jira_url, api_token, issue_key, comment):
+                        print("\nComment added successfully.")
             except Exception as e:
-                logger.error(f"Failed to get comment: {e}")
+                logger.error("Failed to get comment: %s", e)
+        elif action in ("l", "last"):
+            print("\nFetching last comment...")
+            comments = get_issue_comments(jira_url, api_token, issue_key)
+            if comments:
+                last_comment = comments[-1]
+                author = last_comment["author"]["displayName"]
+                created_raw = last_comment["created"]
+                created = created_raw.split("T")[0]
+                body = last_comment["body"]
+                print("-" * 50)
+                print(f"Author: {author} ({created})")
+                print("-" * 50)
+                print(body)
+                print("-" * 50)
+            else:
+                print("No comments found for this issue.")
         elif action in ("s", "status"):
             new_status = process_status_update(
                 issue_key, jira_url, api_token, current_status
