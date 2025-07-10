@@ -15,7 +15,8 @@ requires-python = ">=3.7"
 dependencies = [
     "requests",
     "PyYAML",
-    "keyring"
+    "keyring",
+    "prompt_toolkit"
 ]
 
 [project.urls]
