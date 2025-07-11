@@ -1,9 +1,15 @@
+
 # JASPER: Jira Active Sprint PErsonal Reporter
 
 JASPER is a command-line tool to help you track and manage your assigned Jira issues in
 active sprints. It supports listing issues, adding comments, changing issue status, and
 opening issues in a web browser. Configuration is handled via a YAML file, and API
 tokens are stored securely using the system keyring.
+
+<p align="center">
+  <img src="jasper-demo.gif" alt="JASPER demo" width="700"><br>
+  <i>Demo created with <a href="https://asciinema.org/a/727294">asciinema</a></i>
+</p>
 
 ---
 
