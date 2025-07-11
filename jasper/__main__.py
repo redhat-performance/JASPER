@@ -946,7 +946,7 @@ def process_status_update(
             indicator = " *" if t["name"] == current_status else ""
             print(f"  {i+1}: {t['name']}{indicator}")
         trans_choice = input(
-            "\nEnter the number of the status to change to, or (b)ack, " "or (q)uit: "
+            "\nEnter the number of the status to change to, or (b)ack, or (q)uit: "
         ).lower()
         if trans_choice in ("q", "quit"):
             logger.info("Exiting.")
