@@ -1,9 +1,15 @@
-# JASPER: Jira Active Sprint Personal Reporter
+
+# JASPER: Jira Active Sprint PErsonal Reporter
 
 JASPER is a command-line tool to help you track and manage your assigned Jira issues in
 active sprints. It supports listing issues, adding comments, changing issue status, and
 opening issues in a web browser. Configuration is handled via a YAML file, and API
 tokens are stored securely using the system keyring.
+
+<p align="center">
+  <img src="jasper-demo.gif" alt="JASPER demo" width="700"><br>
+  <i>Demo created with <a href="https://asciinema.org/a/727294">asciinema</a></i>
+</p>
 
 ---
 
@@ -187,31 +193,77 @@ When you select an issue, you will be prompted with additional actions:
   Add a comment to the selected issue. You can enter a multi-line comment, ending with
   a new line and Ctrl+D (Linux/macOS) or Ctrl+Z then Enter (Windows).
 
-- **Update (s)tatus:**  
+- **change (s)tatus:**  
   Change the status of the selected issue. You will be shown available transitions and
   can select one by number.
+
+- **show (l)ast comment:**  
+  Display the most recent comment from the selected issue.
 
 - **(o)pen in browser:**  
   Open the selected issue in your default web browser.
 
-- **(b)ack to list:**  
+- **(b)ack:**  
   Return to the main issue list.
 
 - **(q)uit:**  
-  Exit the program from the issue action menu.
+  Exit the program.
 
 ```console
 Selected: [PROJECT-7760] Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed accumsan porta sem.
-Action: (c)omment, update (s)tatus, (o)pen in browser, (b)ack to list, (q)uit: 
+Action: (c)omment, change (s)tatus, show (l)ast comment, (o)pen in browser, (b)ack, (q)uit: 
+```
+
+When you choose to **(c)omment** on an issue, you will be presented with a `Comment:`
+entry prompt. To end your comment entry, simply press `Esc` followed by `Enter`, or to
+cancel your comment simply use `Ctrl+C` or `Ctrl+D`.
+
+```console
+Enter your comment. To submit, press Esc and then Enter. To cancel, press Ctrl+C or Ctrl+D.
+
+Comment: Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+         Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+
+Comment added successfully.
 ```
 
 > [!NOTE]
 > Jira Data Center comments do **not** support Markdown or HTML formatting via the REST
 > API. Links and formatting will appear as plain text.
 
+Selecting **change (s)tatus** will present a list of available statuses to choose from
+and will highlight the current status with an `*`.
+
+```console
+Getting available statuses...
+
+Available Statuses:
+  1: New *
+  2: In Progress
+  3: Verified
+  4: Review
+  5: Closed
+
+Enter the number of the status to change to, or (b)ack, or (q)uit: 
+```
+
+Selecting **show (l)ast comment** will fetch and display the most recent comment.
+
+```console
+Fetching last comment...
+--------------------------------------------------
+Author: Example User (2025-07-11)
+--------------------------------------------------
+Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+
+Comment added via JASPER: https://github.com/redhat-performance/JASPER
+--------------------------------------------------
+```
+
 ---
 
-## JASPER Attribution in Comments
+### JASPER Attribution in Comments
 
 By default, JASPER will append the following plain text attribution to each comment it
 adds:

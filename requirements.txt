@@ -1,3 +1,4 @@
 requests
 PyYAML
 keyring
+prompt_toolkit

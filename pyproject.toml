@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jasper-jira"
-version = "0.1.0b1"
+version = "0.2.0"
 description = "Jira Active Sprint Personal Reporter"
 authors = [
     { name = "Dustin Black", email = "dblack@redhat.com" }
@@ -15,7 +15,8 @@ requires-python = ">=3.7"
 dependencies = [
     "requests",
     "PyYAML",
-    "keyring"
+    "keyring",
+    "prompt_toolkit"
 ]
 
 [project.urls]
