@@ -25,20 +25,23 @@ License: Apache License, Version 2.0
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import argparse
-import logging
+import asyncio
 import getpass
-import sys
-import os
-import webbrowser
-import time
-import requests
-from typing import Callable
-import yaml
+import json
 import keyring
 import keyring.errors
+import logging
+import os
+import requests
+import sys
+import time
+import webbrowser
+import yaml
 import yaml.parser
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import InMemoryHistory
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Initialize logger
 logger = logging.getLogger("JASPER")
@@ -50,6 +53,7 @@ DEFAULT_ATTRIBUTION = True
 class ColoredFormatter(logging.Formatter):
     """
     Custom formatter to add ANSI color codes to log messages based on severity.
+
     This works on UNIX-like systems and modern Windows terminals.
     """
 
@@ -89,11 +93,11 @@ def jira_query(
     retry_delay=2,
 ):
     """
-    Executes a JQL query against the Jira REST API.
+    Execute a JQL query against the Jira REST API.
 
     Args:
         base_url (str): The base URL of the Jira instance.
-        api_path (str): The API path to use for the query (e.g., "/rest/api/2/search").
+        api_path (str): The API path for the query (e.g., "/rest/api/2/search").
         api_token (str): The API token for authentication.
         method (function): The HTTP requests() method to use (default is requests.get).
         json_payload (dict): Optional JSON payload to send with the request.
@@ -140,7 +144,7 @@ def jira_query(
                 time.sleep(retry_delay)
             else:
                 raise
-    return []
+    return None
 
 
 def check_jira_auth(base_url, api_token):
@@ -174,9 +178,9 @@ def check_jira_auth(base_url, api_token):
         return False
 
 
-def get_active_sprints(base_url, api_token, board_ids, **kwargs):
+def get_active_sprints(base_url, api_token, board_ids):
     """
-    Fetches active sprints from specified boards.
+    Fetch active sprints from specified boards.
 
     Args:
         base_url (str): The base URL of the Jira instance.
@@ -216,7 +220,7 @@ def get_active_sprints(base_url, api_token, board_ids, **kwargs):
 
 def get_user_issues_in_sprints(base_url, api_token, usernames, sprint_ids):
     """
-    Searches for issues assigned to one or more users within a list of sprints.
+    Search for issues assigned to one or more users within a list of sprints.
 
     Args:
         base_url (str): The base URL of the Jira instance.
@@ -280,7 +284,7 @@ def get_user_issues_in_sprints(base_url, api_token, usernames, sprint_ids):
 
 def add_comment_to_issue(base_url, api_token, issue_key, comment_body):
     """
-    Adds a plain text comment to a Jira issue (compatible with Jira Data Center).
+    Add a plain text comment to a Jira issue (compatible with Jira Data Center).
 
     Args:
         base_url (str): The base URL of the Jira instance.
@@ -314,9 +318,36 @@ def add_comment_to_issue(base_url, api_token, issue_key, comment_body):
     return False
 
 
+def get_last_issue_comment(base_url, api_token, issue_key):
+    """
+    Get the most recent comment for a Jira issue.
+
+    Args:
+        base_url (str): The base URL of the Jira instance.
+        api_token (str): The API token for authentication.
+        issue_key (str): The key of the issue.
+
+    Returns:
+        dict or None: The last comment dictionary, or None if no comments exist.
+    """
+    comments_api_path = (
+        f"/rest/api/2/issue/{issue_key}/comment?orderBy=-created&maxResults=1"
+    )
+    try:
+        comments_response = jira_query(base_url, comments_api_path, api_token)
+        if comments_response:
+            comments_response.raise_for_status()
+            comments = comments_response.json().get("comments", [])
+            if comments:
+                return comments[0]
+    except requests.exceptions.RequestException as e:
+        logger.error("Error getting last comment for %s: %s", issue_key, e)
+    return None
+
+
 def get_issue_transitions(base_url, api_token, issue_key):
     """
-    Gets available status transitions for a Jira issue.
+    Get available status transitions for a Jira issue.
 
     Args:
         base_url (str): The base URL of the Jira instance.
@@ -343,7 +374,7 @@ def get_issue_transitions(base_url, api_token, issue_key):
 
 def set_issue_transition(base_url, api_token, issue_key, transition_id):
     """
-    Changes the status of a Jira issue by posting a transition ID.
+    Change the status of a Jira issue by posting a transition ID.
 
     Args:
         base_url (str): The base URL of the Jira instance.
@@ -380,12 +411,12 @@ def set_issue_transition(base_url, api_token, issue_key, transition_id):
 # --- UI & Interaction Functions ---
 
 
-def display_issues(issues):
+def display_issues(issues: List[Dict[str, Any]]):
     """
-    Prints a numbered list of issues to the console with key details and a direct URL.
+    Print a numbered list of issues to the console with key details.
 
     Args:
-        issues (list[dict]): List of Jira issue dictionaries.
+        issues: List of Jira issue dictionaries.
     """
     print("\n--- Active Sprint Items ---")
     for i, issue in enumerate(issues):
@@ -411,25 +442,21 @@ def display_issues(issues):
     print("---------------------------\n")
 
 
-def get_multiline_comment():
-    """
-    Gets multi-line input from the user for a comment.
-
-    Allows users to write detailed comments. The input is terminated by
-    an EOF signal (Ctrl+D on Linux/macOS, Ctrl+Z then Enter on Windows).
-
-    Returns:
-        str or None: The combined multi-line comment, or None if cancelled.
-    """
+async def get_multiline_comment_async() -> Optional[str]:
+    """Get multi-line input using prompt_toolkit for a better experience."""
     print(
-        "Enter your comment, ending with a new line. Press Ctrl+D (Linux/macOS) or "
-        "Ctrl+Z then Enter (Windows) to save.\n"
+        "Enter your comment. To submit, press Esc and then Enter. To cancel, press "
+        "Ctrl+C or Ctrl+D.\n"
     )
+    session = PromptSession(
+        "Comment: ",
+        multiline=True,
+        history=InMemoryHistory(),
+    )
+
     try:
-        lines = sys.stdin.readlines()
-        print("\nSending comment...")
-        return "".join(lines).strip()
-    except KeyboardInterrupt:
+        return await session.prompt_async()
+    except (EOFError, KeyboardInterrupt):
         print("\nComment cancelled.")
         return None
 
@@ -437,9 +464,11 @@ def get_multiline_comment():
 # --- Configuration & Token Management ---
 
 
-def load_config(config_path):
+def load_config(config_path: Optional[str]) -> Tuple[Dict[str, Any], str]:
     """
-    Loads configuration from a YAML file. Searches in this order:
+    Load configuration from a YAML file.
+
+    Searches in this order:
     1. User-provided path from --config (if provided, only this is used)
     2. jasper_config.yaml in the current directory
     3. jasper_config.yaml in $HOME
@@ -495,7 +524,7 @@ def get_api_token_with_auth_check(service_name, keyring_user, jira_url):
     Args:
         service_name (str): The unique name for the service storing the password.
         keyring_user (str): The key used for storing/retrieving the token.
-        jira_url (str): The Jira instance URL, used for generating the token hint.
+        jira_url (str): The Jira instance URL, used for the token hint.
 
     Returns:
         str: The retrieved or entered API token.
@@ -561,12 +590,12 @@ def get_api_token_with_auth_check(service_name, keyring_user, jira_url):
 
 def set_api_token(service_name, user, keyring_available=False, interactive=True):
     """
-    Prompts user for an API token and optionally stores it in the system's keyring.
+    Prompt user for an API token and optionally stores it in the keyring.
 
     Args:
         service_name (str): The unique name for the service.
         user (str): The user key to associate with the token.
-        keyring_available (bool): Whether a keyring backend is available for storage.
+        keyring_available (bool): Whether a keyring backend is available.
     """
     print("Please enter the API token to store securely.")
     try:
@@ -615,7 +644,8 @@ def set_api_token(service_name, user, keyring_available=False, interactive=True)
 
 def main():
     """
-    Main function to orchestrate the script execution and user interaction.
+    Orchestrate the script execution and user interaction.
+
     Handles argument parsing, configuration, authentication, and the main UI loop.
     """
     parser = argparse.ArgumentParser(
@@ -788,10 +818,10 @@ def main():
             "Exiting."
         )
         sys.exit(2)
-    display_issues(issues)
 
     # --- Main Interaction Loop ---
     while True:
+        display_issues(issues)
         try:
             choice = input("Enter an issue number to select, (r)efresh, or (q)uit: ")
             if choice.lower() in ("q", "quit"):
@@ -809,7 +839,6 @@ def main():
                         f"{', '.join(usernames)}. Exiting."
                     )
                     sys.exit(2)
-                display_issues(issues)
                 continue
 
             issue_index = int(choice) - 1
@@ -817,97 +846,138 @@ def main():
                 print("Invalid number. Please try again.")
                 continue
 
-            selected_issue = issues[issue_index]
-            issue_key = selected_issue["key"]
+            process_issue_actions(
+                issues[issue_index], jira_url, api_token, jasper_attribution
+            )
 
-            # --- Action Sub-Loop for a selected issue ---
-            # Allows the user to perform actions on a selected issue.
-            while True:
-                print(
-                    f"\nSelected: [{issue_key}] {selected_issue['fields']['summary']}"
-                )
-                action = input(
-                    "Action: (c)omment, update (s)tatus, (o)pen in browser, (b)ack to "
-                    "list, (q)uit: "
-                ).lower()
-
-                if action in ("q", "quit"):
-                    logger.info("Exiting.")
-                    sys.exit(0)
-
-                elif action in ("b", "back"):
-                    display_issues(issues)
-                    break
-
-                elif action in ("o", "open"):
-                    issue_url = f"{jira_url.rstrip('/')}/browse/{issue_key}"
-                    webbrowser.open_new_tab(issue_url)
-                    logger.info(f"Opening {issue_url} in your browser...")
-
-                elif action in ("c", "comment"):
-                    comment = get_multiline_comment()
-                    if comment:
-                        if jasper_attribution:
-                            comment += (
-                                "\n\nComment added via JASPER: "
-                                "https://github.com/redhat-performance/JASPER"
-                            )
-                        add_comment_to_issue(jira_url, api_token, issue_key, comment)
-
-                elif action in ("s", "status"):
-                    print("Getting available statuses...")
-                    transitions = get_issue_transitions(jira_url, api_token, issue_key)
-                    if not transitions:
-                        logger.warning(
-                            "No available status transitions for this issue."
-                        )
-                        continue
-
-                    closed_transitions = [
-                        t for t in transitions if t["name"].lower() == "closed"
-                    ]
-                    not_closed_transitions = [
-                        t for t in transitions if t["name"].lower() != "closed"
-                    ]
-                    transitions_sorted = not_closed_transitions + closed_transitions
-
-                    while True:
-                        print("\nAvailable Statuses:")
-                        for i, t in enumerate(transitions_sorted):
-                            print(f"  {i+1}: {t['name']}")
-                        trans_choice = input(
-                            "\nEnter the number of the status to change to, or (b)ack, "
-                            "or (q)uit: "
-                        ).lower()
-                        if trans_choice in ("q", "quit"):
-                            logger.info("Exiting.")
-                            sys.exit(0)
-                        if trans_choice in ("b", "back"):
-                            break
-                        if not trans_choice.strip():
-                            # Empty input: re-display the list of available statuses
-                            continue
-
-                        try:
-                            trans_index = int(trans_choice) - 1
-                            if 0 <= trans_index < len(transitions_sorted):
-                                transition_id = transitions_sorted[trans_index]["id"]
-                                if set_issue_transition(
-                                    jira_url, api_token, issue_key, transition_id
-                                ):
-                                    print("Status updated. Refresh to see changes.\n")
-                            else:
-                                print("Invalid transition number.")
-                        except ValueError:
-                            print("Invalid input.")
-                else:
-                    print("Invalid action. Please choose from the options.")
         except ValueError:
             print("Invalid input. Please enter a number, 'r', or 'q'.")
         except (EOFError, KeyboardInterrupt):
             # Gracefully handle Ctrl+C or Ctrl+D to exit the script.
             print("\nExiting.")
             break
+
+
+def process_issue_actions(
+    issue: Dict[str, Any], jira_url: str, api_token: str, jasper_attribution: bool
+):
+    """
+    Handle the user interaction loop for a single selected issue.
+    """
+    issue_key = issue["key"]
+    current_status = issue["fields"]["status"]["name"]
+    while True:
+        print(f"\nSelected: [{issue_key}] {issue['fields']['summary']}")
+        action = input(
+            "Action: (c)omment, change (s)tatus, show (l)ast comment, "
+            "(o)pen in browser, (b)ack, (q)uit: "
+        ).lower()
+
+        if action in ("q", "quit"):
+            logger.info("Exiting.")
+            sys.exit(0)
+        elif action in ("b", "back"):
+            return
+        elif action in ("o", "open"):
+            issue_url = f"{jira_url.rstrip('/')}/browse/{issue_key}"
+            webbrowser.open_new_tab(issue_url)
+            logger.info(f"Opening {issue_url} in your browser...")
+        elif action in ("c", "comment"):
+            try:
+                comment = asyncio.run(get_multiline_comment_async())
+                if comment:
+                    if jasper_attribution:
+                        comment += (
+                            "\n\nComment added via JASPER: "
+                            "https://github.com/redhat-performance/JASPER"
+                        )
+                    if add_comment_to_issue(jira_url, api_token, issue_key, comment):
+                        print("\nComment added successfully.")
+            except Exception as e:
+                logger.error("Failed to get comment: %s", e)
+        elif action in ("l", "last"):
+            print("\nFetching last comment...")
+            last_comment = get_last_issue_comment(jira_url, api_token, issue_key)
+            if last_comment:
+                author = last_comment["author"]["displayName"]
+                created_raw = last_comment["created"]
+                created = created_raw.split("T")[0]
+                body = last_comment["body"]
+                print("-" * 50)
+                print(f"Author: {author} ({created})")
+                print("-" * 50)
+                print(body)
+                print("-" * 50)
+            else:
+                print("No comments found for this issue.")
+        elif action in ("s", "status"):
+            new_status = process_status_update(
+                issue_key, jira_url, api_token, current_status
+            )
+            if new_status:
+                current_status = new_status
+        else:
+            print("Invalid action. Please choose from the options.")
+
+
+def process_status_update(
+    issue_key: str, jira_url: str, api_token: str, current_status: str
+) -> Optional[str]:
+    """
+    Handle the logic for updating an issue's status.
+
+    Returns the final status name when the user exits this menu.
+    """
+    print("Getting available statuses...")
+    transitions = get_issue_transitions(jira_url, api_token, issue_key)
+    if not transitions:
+        logger.warning("No available status transitions for this issue.")
+        return current_status
+
+    while True:
+        closed_transitions = [t for t in transitions if t["name"].lower() == "closed"]
+        not_closed_transitions = [
+            t for t in transitions if t["name"].lower() != "closed"
+        ]
+        transitions_sorted = not_closed_transitions + closed_transitions
+
+        print("\nAvailable Statuses:")
+        for i, t in enumerate(transitions_sorted):
+            indicator = " *" if t["name"] == current_status else ""
+            print(f"  {i+1}: {t['name']}{indicator}")
+        trans_choice = input(
+            "\nEnter the number of the status to change to, or (b)ack, or (q)uit: "
+        ).lower()
+        if trans_choice in ("q", "quit"):
+            logger.info("Exiting.")
+            sys.exit(0)
+        if trans_choice in ("b", "back"):
+            break
+        if not trans_choice.strip():
+            # Empty input: re-display the list of available statuses
+            continue
+
+        try:
+            trans_index = int(trans_choice) - 1
+            if 0 <= trans_index < len(transitions_sorted):
+                selected_transition = transitions_sorted[trans_index]
+                transition_id = selected_transition["id"]
+                if set_issue_transition(jira_url, api_token, issue_key, transition_id):
+                    print("Status updated.\n")
+                    current_status = selected_transition["name"]
+                    print("Getting updated available statuses...")
+                    transitions = get_issue_transitions(jira_url, api_token, issue_key)
+                    if not transitions:
+                        logger.warning(
+                            "No further transitions available from this status."
+                        )
+                        break
+            else:
+                print("Invalid transition number.")
+        except ValueError:
+            print("Invalid input.")
+
+    return current_status
 
 
 # This ensures the main() function is called only when the script is executed directly.

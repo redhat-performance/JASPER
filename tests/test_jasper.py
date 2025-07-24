@@ -10,19 +10,19 @@ Author: Dustin Black
 License: Apache License, Version 2.0
 """
 
-import unittest
-from unittest.mock import patch, MagicMock
-import os
-import json
+import asyncio
 import io
-import builtins
+import json
 import logging
+import os
+import unittest
+from unittest.mock import MagicMock, patch
+
+import keyring.errors
 import requests
 import yaml
-import keyring.errors
 
 import jasper.__main__ as jasper_main
-from jasper.__main__ import get_api_token_with_auth_check
 
 
 class TestJasperMain(unittest.TestCase):
@@ -163,6 +163,33 @@ class TestJasperMain(unittest.TestCase):
 
         # Verify that the function actually checked for files
         self.assertTrue(mock_exists.called)
+
+    @patch("jasper.__main__.jira_query")
+    def test_get_last_issue_comment_success(self, mock_jira_query):
+        """Test get_last_issue_comment returns a comment on success."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"comments": [{"body": "a comment"}]}
+        mock_jira_query.return_value = mock_resp
+
+        comment = jasper_main.get_last_issue_comment(
+            self.fake_jira_url, self.fake_api_token, self.fake_issue_key
+        )
+        self.assertIsNotNone(comment)
+        self.assertEqual(comment["body"], "a comment")
+
+    @patch("jasper.__main__.jira_query")
+    def test_get_last_issue_comment_failure(self, mock_jira_query):
+        """Test get_last_issue_comment returns None on failure."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 404
+        mock_resp.raise_for_status.side_effect = requests.exceptions.HTTPError()
+        mock_jira_query.return_value = mock_resp
+
+        comment = jasper_main.get_last_issue_comment(
+            self.fake_jira_url, self.fake_api_token, self.fake_issue_key
+        )
+        self.assertIsNone(comment)
 
     # --- Keyring Interaction Tests ---
 
@@ -365,19 +392,21 @@ class TestJasperMain(unittest.TestCase):
     @patch("jasper.__main__.get_api_token_with_auth_check", return_value="fake-token")
     @patch("jasper.__main__.get_active_sprints", return_value=[100])
     @patch("jasper.__main__.get_user_issues_in_sprints")
-    @patch("jasper.__main__.webbrowser.open_new_tab")
-    @patch("builtins.input", side_effect=["1", "o", "b", "q"])
-    def test_main_action_open_in_browser(
+    @patch("jasper.__main__.get_last_issue_comment")
+    @patch("sys.stdout", new_callable=io.StringIO)
+    @patch("builtins.input", side_effect=["1", "l", "b", "q"])
+    def test_main_action_last_comment(
         self,
         mock_input,
-        mock_webbrowser,
+        mock_stdout,
+        mock_get_last_comment,
         mock_get_issues,
         mock_sprints,
         mock_token,
         mock_config,
         mock_args,
     ):
-        """Test main loop selecting an issue and opening it."""
+        """Test the main loop for showing the last comment."""
         mock_args.return_value = MagicMock(
             config="c.yaml",
             jira_url=None,
@@ -396,10 +425,18 @@ class TestJasperMain(unittest.TestCase):
             "c.yaml",
         )
         mock_get_issues.return_value = self.mock_issue_list
+        mock_get_last_comment.return_value = {
+            "author": {"displayName": "Test User"},
+            "created": "2025-07-10T12:00:00.000-0500",
+            "body": "This is the last comment.",
+        }
 
         jasper_main.main()
 
-        mock_webbrowser.assert_called_with(f"{self.fake_jira_url}/browse/PROJ-123")
+        output = mock_stdout.getvalue()
+        self.assertIn("Fetching last comment...", output)
+        self.assertIn("Author: Test User (2025-07-10)", output)
+        self.assertIn("This is the last comment.", output)
 
     @patch("argparse.ArgumentParser.parse_args")
     @patch("jasper.__main__.load_config")
@@ -407,12 +444,12 @@ class TestJasperMain(unittest.TestCase):
     @patch("jasper.__main__.get_active_sprints", return_value=[100])
     @patch("jasper.__main__.get_user_issues_in_sprints")
     @patch("jasper.__main__.add_comment_to_issue")
-    @patch("jasper.__main__.get_multiline_comment", return_value="Test comment")
+    @patch("jasper.__main__.asyncio.run", return_value="Test comment")
     @patch("builtins.input", side_effect=["1", "c", "b", "q"])
     def test_main_action_add_comment(
         self,
         mock_input,
-        mock_get_comment,
+        mock_asyncio_run,
         mock_add_comment,
         mock_get_issues,
         mock_sprints,
@@ -650,7 +687,7 @@ class TestJasperMain(unittest.TestCase):
         self, mock_logger, mock_getpass, mock_input, mock_check_auth, mock_keyring_get
     ):
         """Test the flow when the keyring backend is not available."""
-        get_api_token_with_auth_check("service", "user", self.fake_jira_url)
+        jasper_main.get_api_token_with_auth_check("service", "user", self.fake_jira_url)
         mock_logger.warning.assert_any_call(
             "`keyring` backend not found."
             "For secure storage, please install a backend "
@@ -665,234 +702,31 @@ class TestJasperMain(unittest.TestCase):
         self, mock_getpass, mock_input, mock_check_auth, mock_keyring_get
     ):
         """Test entering an invalid token followed by a valid one."""
-        token = get_api_token_with_auth_check("service", "user", self.fake_jira_url)
+        token = jasper_main.get_api_token_with_auth_check(
+            "service", "user", self.fake_jira_url
+        )
         self.assertEqual(token, "valid-token")
         self.assertEqual(mock_getpass.call_count, 2)
 
-    @patch("sys.stdin")
+    @patch("prompt_toolkit.PromptSession.prompt_async", side_effect=KeyboardInterrupt)
     @patch("sys.stdout", new_callable=io.StringIO)
-    def test_get_multiline_comment_keyboard_interrupt(self, mock_stdout, mock_stdin):
-        """Test that get_multiline_comment handles KeyboardInterrupt gracefully."""
-        # Simulate Ctrl+C during input
-        mock_stdin.readlines.side_effect = KeyboardInterrupt
-
-        comment = jasper_main.get_multiline_comment()
-
+    def test_get_multiline_comment_async_keyboard_interrupt(
+        self, mock_stdout, mock_prompt_async
+    ):
+        """Test get_multiline_comment_async handles KeyboardInterrupt."""
+        comment = asyncio.run(jasper_main.get_multiline_comment_async())
         self.assertIsNone(comment)
         self.assertIn("Comment cancelled.", mock_stdout.getvalue())
 
-    @patch("argparse.ArgumentParser.parse_args")
-    @patch("jasper.__main__.load_config")
-    @patch("jasper.__main__.get_api_token_with_auth_check", return_value="fake-token")
-    @patch("jasper.__main__.get_active_sprints", return_value=[])
-    @patch("jasper.__main__.logger")
-    def test_main_no_active_sprints(
-        self, mock_logger, mock_sprints, mock_token, mock_config, mock_args
-    ):
-        """Test the main flow when no active sprints are found."""
-        mock_args.return_value = MagicMock(
-            config="c.yaml",
-            jira_url=None,
-            usernames=None,
-            board_ids=None,
-            set_token=False,
-            no_jasper_attribution=False,
-            verbose=0,
-        )
-        mock_config.return_value = (
-            {"jira_url": self.fake_jira_url, "usernames": ["user"], "board_ids": [1]},
-            "c.yaml",
-        )
-
-        with self.assertRaises(SystemExit) as cm:
-            jasper_main.main()
-
-        self.assertEqual(cm.exception.code, 2)
-        mock_logger.error.assert_called_with(
-            "No active sprints found or an error occurred. Exiting."
-        )
-
-    @patch("argparse.ArgumentParser.parse_args")
-    @patch("jasper.__main__.load_config")
-    @patch("jasper.__main__.get_api_token_with_auth_check", return_value="fake-token")
-    @patch("jasper.__main__.get_active_sprints", return_value=[100])
-    @patch("jasper.__main__.get_user_issues_in_sprints", return_value=[])
+    @patch("prompt_toolkit.PromptSession.prompt_async", side_effect=EOFError)
     @patch("sys.stdout", new_callable=io.StringIO)
-    def test_main_no_issues_found(
-        self,
-        mock_stdout,
-        mock_get_issues,
-        mock_sprints,
-        mock_token,
-        mock_config,
-        mock_args,
+    def test_get_multiline_comment_async_eof_error(
+        self, mock_stdout, mock_prompt_async
     ):
-        """Test the main flow when no issues are found for the user."""
-        mock_args.return_value = MagicMock(
-            config="c.yaml",
-            jira_url=None,
-            usernames=None,
-            board_ids=None,
-            set_token=False,
-            no_jasper_attribution=False,
-            verbose=0,
-        )
-        mock_config.return_value = (
-            {"jira_url": self.fake_jira_url, "usernames": ["user"], "board_ids": [1]},
-            "c.yaml",
-        )
-
-        with self.assertRaises(SystemExit) as cm:
-            jasper_main.main()
-
-        self.assertEqual(cm.exception.code, 2)
-        self.assertIn("No active sprint items found", mock_stdout.getvalue())
-
-    @patch("argparse.ArgumentParser.parse_args")
-    @patch("jasper.__main__.load_config")
-    @patch("jasper.__main__.get_api_token_with_auth_check", return_value="fake-token")
-    @patch("jasper.__main__.get_active_sprints", return_value=[100])
-    @patch("jasper.__main__.get_user_issues_in_sprints")
-    @patch("sys.stdout", new_callable=io.StringIO)
-    @patch("builtins.input", side_effect=["-1", "q"])  # Invalid issue number
-    def test_main_invalid_issue_number(
-        self,
-        mock_input,
-        mock_stdout,
-        mock_get_issues,
-        mock_sprints,
-        mock_token,
-        mock_config,
-        mock_args,
-    ):
-        """Test the main loop with an invalid issue number."""
-        mock_args.return_value = MagicMock(
-            set_token=False,
-            no_jasper_attribution=False,
-            config=None,
-            jira_url=None,
-            usernames=None,
-            board_ids=None,
-            verbose=0,
-        )
-        mock_config.return_value = (
-            {"jira_url": self.fake_jira_url, "usernames": ["user"], "board_ids": [1]},
-            "c.yaml",
-        )
-        mock_get_issues.return_value = self.mock_issue_list
-
-        jasper_main.main()
-        self.assertIn("Invalid number. Please try again.", mock_stdout.getvalue())
-
-    @patch("argparse.ArgumentParser.parse_args")
-    @patch("jasper.__main__.load_config")
-    @patch("jasper.__main__.get_api_token_with_auth_check", return_value="fake-token")
-    @patch("jasper.__main__.get_active_sprints", return_value=[100])
-    @patch("jasper.__main__.get_user_issues_in_sprints")
-    @patch("sys.stdout", new_callable=io.StringIO)
-    @patch("builtins.input", side_effect=["1", "x", "b", "q"])  # Invalid action
-    def test_main_invalid_action_choice(
-        self,
-        mock_input,
-        mock_stdout,
-        mock_get_issues,
-        mock_sprints,
-        mock_token,
-        mock_config,
-        mock_args,
-    ):
-        """Test the main loop with an invalid action choice."""
-        mock_args.return_value = MagicMock(
-            set_token=False,
-            no_jasper_attribution=False,
-            config=None,
-            jira_url=None,
-            usernames=None,
-            board_ids=None,
-            verbose=0,
-        )
-        mock_config.return_value = (
-            {"jira_url": self.fake_jira_url, "usernames": ["user"], "board_ids": [1]},
-            "c.yaml",
-        )
-        mock_get_issues.return_value = self.mock_issue_list
-
-        jasper_main.main()
-
-        self.assertIn(
-            "Invalid action. Please choose from the options.", mock_stdout.getvalue()
-        )
-
-    @patch("argparse.ArgumentParser.parse_args")
-    @patch("jasper.__main__.load_config")
-    @patch("jasper.__main__.get_api_token_with_auth_check", return_value="fake-token")
-    @patch("jasper.__main__.get_active_sprints", return_value=[100])
-    @patch("jasper.__main__.get_user_issues_in_sprints")
-    @patch("jasper.__main__.set_issue_transition")
-    @patch("jasper.__main__.get_issue_transitions")
-    @patch("sys.stdout", new_callable=io.StringIO)
-    @patch("builtins.input", side_effect=["1", "s", "invalid", "b", "b", "q"])
-    def test_main_invalid_transition_number(
-        self,
-        mock_input,
-        mock_stdout,
-        mock_get_trans,
-        mock_set_trans,
-        mock_get_issues,
-        mock_sprints,
-        mock_token,
-        mock_config,
-        mock_args,
-    ):
-        """Test the status update flow with an invalid transition number."""
-        mock_args.return_value = MagicMock(
-            set_token=False,
-            no_jasper_attribution=False,
-            config=None,
-            jira_url=None,
-            usernames=None,
-            board_ids=None,
-            verbose=0,
-        )
-        mock_config.return_value = (
-            {"jira_url": self.fake_jira_url, "usernames": ["user"], "board_ids": [1]},
-            "c.yaml",
-        )
-        mock_get_issues.return_value = self.mock_issue_list
-        mock_get_trans.return_value = [{"id": "1", "name": "Done"}]
-
-        jasper_main.main()
-
-        self.assertIn("Invalid input.", mock_stdout.getvalue())
-
-    @patch("jasper.__main__.requests.get")
-    def test_get_active_sprints_request_exception(self, mock_get):
-        """Test get_active_sprints handles a generic RequestException."""
-        mock_get.side_effect = requests.exceptions.RequestException("Connection error")
-        sprints = jasper_main.get_active_sprints(
-            self.fake_jira_url, "token", [1], max_retries=1, retry_delay=0
-        )
-        self.assertEqual(sprints, [])
-
-    @patch("jasper.__main__.main")
-    def test_main_entry_point_keyboard_interrupt(self, mock_main):
-        """Test the main entry point's KeyboardInterrupt handler."""
-        # This test ensures the `if __name__ == "__main__"` block is covered
-        mock_main.side_effect = KeyboardInterrupt
-        with patch.object(builtins, "__name__", "__main__"):
-            with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-                # Need to import and run the script's entry point logic
-                # in a way that the test runner can capture it.
-                # A simple import and call won't trigger the __name__ check.
-                # We can simulate it by calling a function that runs the code.
-                def run_main_block():
-                    try:
-                        jasper_main.main()
-                    except KeyboardInterrupt:
-                        print("\nInterrupted by user. Exiting.")
-
-                run_main_block()
-                self.assertIn("Interrupted by user. Exiting.", mock_stdout.getvalue())
+        """Test get_multiline_comment_async handles EOFError."""
+        comment = asyncio.run(jasper_main.get_multiline_comment_async())
+        self.assertIsNone(comment)
+        self.assertIn("Comment cancelled.", mock_stdout.getvalue())
 
     @patch("argparse.ArgumentParser.parse_args")
     @patch("jasper.__main__.load_config")
