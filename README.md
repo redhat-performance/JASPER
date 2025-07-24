@@ -69,6 +69,10 @@ board_ids:
 
 # Set to false to disable JASPER attribution in comments
 jasper_attribution: true
+
+# Comment Entry Method (optional)
+# If set to 'editor', JASPER will launch your $EDITOR (e.g., vim, nano) for comment entry, similar to git commit. If set to 'stdin' or omitted, you will enter comments directly in the terminal (the old way).
+comment_entry: stdin   # or 'editor' to use your $EDITOR for comment entry
 ```
 
 ---
@@ -104,6 +108,7 @@ jasper_attribution: true
 - `--no-jasper-attribution`: Do not add JASPER attribution to comments (overrides config)
 - `--help`: Show all options
 - `-v/-vv`: Show INFO/DEBUG log messages
+- `--comment-entry`: How to enter comments: `stdin` (default, type in terminal) or `editor` (launch $EDITOR for multi-line comment entry, like git commit)
 
 ---
 

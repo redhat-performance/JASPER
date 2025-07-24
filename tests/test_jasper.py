@@ -728,6 +728,46 @@ class TestJasperMain(unittest.TestCase):
         self.assertIsNone(comment)
         self.assertIn("Comment cancelled.", mock_stdout.getvalue())
 
+    @patch("jasper.__main__.os.unlink")
+    @patch(
+        "builtins.open",
+        new_callable=unittest.mock.mock_open,
+        read_data="This is a test comment.\n# comment line\n"
+    )
+    @patch("tempfile.NamedTemporaryFile")
+    @patch("subprocess.call", return_value=0)
+    def test_get_multiline_comment_editor_success(
+        self, mock_subprocess, mock_tempfile, mock_open, mock_unlink
+    ):
+        """Test get_multiline_comment_editor returns the comment (ignoring comment lines)."""
+        mock_file = MagicMock()
+        mock_file.write = MagicMock()
+        mock_file.flush = MagicMock()
+        mock_file.__enter__.return_value = mock_file
+        mock_file.name = "fake_temp_file"
+        mock_tempfile.return_value = mock_file
+
+        comment = jasper_main.get_multiline_comment_editor()
+        self.assertEqual(comment, "This is a test comment.")
+        mock_subprocess.assert_called_once()
+        mock_unlink.assert_called_with("fake_temp_file")
+
+    @patch("jasper.__main__.os.unlink")
+    @patch("tempfile.NamedTemporaryFile")
+    @patch("subprocess.call", return_value=1)
+    def test_get_multiline_comment_editor_cancelled(
+        self, mock_subprocess, mock_tempfile, mock_unlink
+    ):
+        """Test get_multiline_comment_editor returns None when editor exits with error."""
+        mock_file = MagicMock()
+        mock_file.__enter__.return_value = mock_file
+        mock_file.name = "fake_temp_file"
+        mock_tempfile.return_value = mock_file
+
+        comment = jasper_main.get_multiline_comment_editor()
+        self.assertIsNone(comment)
+        mock_unlink.assert_called_with("fake_temp_file")
+
     @patch("argparse.ArgumentParser.parse_args")
     @patch("jasper.__main__.load_config")
     @patch("jasper.__main__.get_api_token_with_auth_check", return_value="fake-token")
