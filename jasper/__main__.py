@@ -461,6 +461,54 @@ async def get_multiline_comment_async() -> Optional[str]:
         return None
 
 
+def get_multiline_comment_editor():
+    import tempfile
+    import subprocess
+    import shlex
+    import os
+    editor = os.environ.get("EDITOR", "vi")
+    initial_message = (
+        "\n"  # Blank line for user entry
+        "# Enter your comment above. Lines starting with '#' are ignored.\n"
+        "# Save and close the editor to submit. Quit without saving to cancel.\n"
+    )
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        delete=False,
+        suffix=".tmp",
+        encoding="utf-8"
+    ) as tf:
+        tf.write(initial_message)
+        tf.flush()
+        temp_path = tf.name
+    try:
+        ret = subprocess.call(shlex.split(f"{editor} {temp_path}"))
+    except Exception as e:
+        print(f"Error launching editor: {e}")
+        os.unlink(temp_path)
+        return None
+    if ret != 0:
+        print(f"Editor exited with nonzero status ({ret}), comment cancelled.")
+        os.unlink(temp_path)
+        return None
+    with open(temp_path, "r", encoding="utf-8") as tf:
+        lines = tf.readlines()
+    os.unlink(temp_path)
+    comment_lines = [line for line in lines if not line.strip().startswith('#')]
+    comment = "".join(comment_lines).strip()
+    if not comment:
+        print("No comment entered. Cancelled.")
+        return None
+    return comment
+
+
+def get_multiline_comment(comment_entry):
+    if comment_entry == "editor":
+        return get_multiline_comment_editor()
+    else:
+        return asyncio.run(get_multiline_comment_async())
+
+
 # --- Configuration & Token Management ---
 
 
@@ -689,6 +737,13 @@ def main():
         help="Do not add JASPER attribution to comments.",
     )
     parser.add_argument(
+        "--comment-entry",
+        choices=["stdin", "editor"],
+        default=None,
+        help="How to enter comments: 'stdin' (default, type in terminal) or 'editor'"
+        "(launch $EDITOR)",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="count",
@@ -803,6 +858,9 @@ def main():
     else:
         jasper_attribution = DEFAULT_ATTRIBUTION
 
+    # After config is loaded and args are parsed
+    comment_entry = args.comment_entry or config.get("comment_entry", "stdin")
+
     # Fetch initial data: active sprints and issues.
     active_sprints = get_active_sprints(jira_url, api_token, board_ids=board_ids)
     if not active_sprints:
@@ -847,7 +905,11 @@ def main():
                 continue
 
             process_issue_actions(
-                issues[issue_index], jira_url, api_token, jasper_attribution
+                issues[issue_index],
+                jira_url,
+                api_token,
+                jasper_attribution,
+                comment_entry
             )
 
         except ValueError:
@@ -859,7 +921,11 @@ def main():
 
 
 def process_issue_actions(
-    issue: Dict[str, Any], jira_url: str, api_token: str, jasper_attribution: bool
+    issue: Dict[str, Any],
+    jira_url: str,
+    api_token: str,
+    jasper_attribution: bool,
+    comment_entry: str
 ):
     """
     Handle the user interaction loop for a single selected issue.
@@ -884,7 +950,7 @@ def process_issue_actions(
             logger.info(f"Opening {issue_url} in your browser...")
         elif action in ("c", "comment"):
             try:
-                comment = asyncio.run(get_multiline_comment_async())
+                comment = get_multiline_comment(comment_entry)
                 if comment:
                     if jasper_attribution:
                         comment += (

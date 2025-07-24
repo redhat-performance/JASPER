@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jasper-jira"
-version = "0.2.0"
+version = "0.3.0"
 description = "Jira Active Sprint Personal Reporter"
 authors = [
     { name = "Dustin Black", email = "dblack@redhat.com" }
