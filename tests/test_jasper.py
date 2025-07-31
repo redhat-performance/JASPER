@@ -675,6 +675,7 @@ class TestJasperMain(unittest.TestCase):
         )
         mock_exit.assert_called_with(0)
 
+    @patch("os.environ.get", return_value=None)
     @patch(
         "jasper.__main__.keyring.get_password",
         side_effect=keyring.errors.NoKeyringError,
@@ -684,7 +685,7 @@ class TestJasperMain(unittest.TestCase):
     @patch("getpass.getpass", return_value="new-token")
     @patch("jasper.__main__.logger")
     def test_get_api_token_no_keyring_backend(
-        self, mock_logger, mock_getpass, mock_input, mock_check_auth, mock_keyring_get
+        self, mock_logger, mock_getpass, mock_input, mock_check_auth, mock_keyring_get, mock_os_get
     ):
         """Test the flow when the keyring backend is not available."""
         jasper_main.get_api_token_with_auth_check("service", "user", self.fake_jira_url)
@@ -694,12 +695,13 @@ class TestJasperMain(unittest.TestCase):
             "(e.g., 'pip install keyrings.cryptfile')"
         )
 
+    @patch("os.environ.get", return_value=None)
     @patch("jasper.__main__.keyring.get_password", return_value=None)
     @patch("jasper.__main__.check_jira_auth", side_effect=[False, True])
     @patch("builtins.input", return_value="n")  # User chooses not to save token
     @patch("getpass.getpass", side_effect=["invalid-token", "valid-token"])
     def test_get_api_token_invalid_then_valid(
-        self, mock_getpass, mock_input, mock_check_auth, mock_keyring_get
+        self, mock_getpass, mock_input, mock_check_auth, mock_keyring_get, mock_os_get
     ):
         """Test entering an invalid token followed by a valid one."""
         token = jasper_main.get_api_token_with_auth_check(
@@ -814,6 +816,30 @@ class TestJasperMain(unittest.TestCase):
 
                 # Check the level of the global logger instance
                 self.assertEqual(jasper_main.logger.level, expected_level)
+
+    @patch.dict(os.environ, {"JIRA_API_TOKEN": "env-token"})
+    @patch("jasper.__main__.check_jira_auth", return_value=True)
+    def test_get_api_token_with_auth_check_from_env(self, mock_check_auth):
+        """Test that the API token is correctly read from the environment variable."""
+        token = jasper_main.get_api_token_with_auth_check(
+            "service", "user", self.fake_jira_url
+        )
+        self.assertEqual(token, "env-token")
+        mock_check_auth.assert_called_with(self.fake_jira_url, "env-token")
+
+    @patch.dict(os.environ, {"JIRA_API_TOKEN": "invalid-env-token"})
+    @patch("jasper.__main__.check_jira_auth", return_value=False)
+    def test_get_api_token_with_auth_check_from_env_invalid(self, mock_check_auth):
+        """Test that an invalid API token from the environment variable raises an exception."""
+        with self.assertRaises(Exception) as context:
+            jasper_main.get_api_token_with_auth_check(
+                "service", "user", self.fake_jira_url
+            )
+        self.assertTrue(
+            "API token from JIRA_API_TOKEN environment variable is invalid."
+            in str(context.exception)
+        )
+        mock_check_auth.assert_called_with(self.fake_jira_url, "invalid-env-token")
 
 
 if __name__ == "__main__":

@@ -577,6 +577,18 @@ def get_api_token_with_auth_check(service_name, keyring_user, jira_url):
     Returns:
         str: The retrieved or entered API token.
     """
+    # First, check for the environment variable
+    api_token_env = os.environ.get("JIRA_API_TOKEN")
+    if api_token_env:
+        logger.info("API token found in JIRA_API_TOKEN environment variable.")
+        if check_jira_auth(jira_url, api_token_env):
+            logger.info("API authentication successful.")
+            return api_token_env
+        else:
+            raise Exception(
+                "API token from JIRA_API_TOKEN environment variable is invalid."
+            )
+
     from_keyring = False
     first_prompt = True
     keyring_available = True
@@ -634,6 +646,7 @@ def get_api_token_with_auth_check(service_name, keyring_user, jira_url):
                 "--set-token or manually in your keyring."
             )
         logger.warning("Invalid API token. Please try again.\n")
+
 
 
 def set_api_token(service_name, user, keyring_available=False, interactive=True):
