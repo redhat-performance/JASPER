@@ -114,26 +114,36 @@ comment_entry: stdin   # or 'editor' to use your $EDITOR for comment entry
 
 ## Authentication & API Token Storage
 
-JASPER uses a Jira API token for authentication. The token is stored securely using
-your system keyring. The keyring entry is scoped to your Jira instance and a fixed key
-("jasper"), so only one token per Jira instance is stored.
+JASPER uses a Jira API token for authentication. The token can be provided via an
+environment variable or stored securely using your system's keyring.
 
-You can add your Jira API token to the keyring securely once, and it will be available
-for all future runs of JASPER.
+The recommended priority for providing the token is as follows:
 
-```sh
-jasper --set-token
-```
+1.  **Environment Variable (Highest Priority):**
+    - Set the `JIRA_API_TOKEN` environment variable to your Jira API token.
+    - JASPER will use this token first if it is available.
+    - Example: `export JIRA_API_TOKEN="your-jira-api-token"`
 
-- If, when running JASPER, no token is found in the keyring, you will be prompted to
-  enter one.
+2.  **System Keyring (Recommended for Secure Storage):**
+    - If the environment variable is not set, JASPER will look for the token in your
+      system's keyring.
+    - The keyring entry is scoped to your Jira instance and a fixed key ("jasper"), so
+      only one token per Jira instance is stored.
+    - You can add your Jira API token to the keyring securely once, and it will be
+      available for all future runs of JASPER.
+      ```sh
+      jasper --set-token
+      ```
+
+- If, when running JASPER, no token is found in the environment variable or the keyring,
+  you will be prompted to enter one.
 - You will also be asked if you want to store the token in your keyring for future use.
 
 > [!NOTE]
 > To create a Jira API token, go to your Jira Data Center profile and look for
-> "Personal Access Tokens" under your profile or account settings.  
-> For example, visit:  
-> `https://your-jira.example.com/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens`  
+> "Personal Access Tokens" under your profile or account settings.
+> For example, visit:
+> `https://your-jira.example.com/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens`
 > If you do not see this option, contact your Jira administrator.
 
 ---
