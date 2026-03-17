@@ -27,6 +27,7 @@ License: Apache License, Version 2.0
 
 import argparse
 import asyncio
+import base64
 import getpass
 import json
 import keyring
@@ -87,6 +88,7 @@ def jira_query(
     base_url,
     api_path,
     api_token,
+    auth_email,
     method: Callable = None,
     json_payload=None,
     max_retries=3,
@@ -99,6 +101,7 @@ def jira_query(
         base_url (str): The base URL of the Jira instance.
         api_path (str): The API path for the query (e.g., "/rest/api/2/search").
         api_token (str): The API token for authentication.
+        auth_email (str): The email address for Basic Auth.
         method (function): The HTTP requests() method to use (default is requests.get).
         json_payload (dict): Optional JSON payload to send with the request.
         max_retries (int): Number of retries for transient errors.
@@ -108,8 +111,9 @@ def jira_query(
         list[dict]: A list of issue dictionaries, or an empty list on failure.
     """
     query_url = f"{base_url}{api_path}"
+    credentials = base64.b64encode(f"{auth_email}:{api_token}".encode()).decode()
     headers = {
-        "Authorization": f"Bearer {api_token}",
+        "Authorization": f"Basic {credentials}",
         "Accept": "application/json",
     }
     if json_payload:
@@ -147,13 +151,14 @@ def jira_query(
     return None
 
 
-def check_jira_auth(base_url, api_token):
+def check_jira_auth(base_url, api_token, auth_email):
     """
-    Check if the provided Jira credentials are valid using Bearer token.
+    Check if the provided Jira credentials are valid.
 
     Args:
         base_url (str): The Jira instance URL.
         api_token (str): The API token for authentication.
+        auth_email (str): The email address for Basic Auth.
 
     Returns:
         bool: True if authentication is successful, False otherwise.
@@ -164,6 +169,7 @@ def check_jira_auth(base_url, api_token):
             base_url,
             test_api_path,
             api_token,
+            auth_email,
         )
         if test_response and test_response.status_code == 200:
             return True
@@ -178,13 +184,14 @@ def check_jira_auth(base_url, api_token):
         return False
 
 
-def get_active_sprints(base_url, api_token, board_ids):
+def get_active_sprints(base_url, api_token, auth_email, board_ids):
     """
     Fetch active sprints from specified boards.
 
     Args:
         base_url (str): The base URL of the Jira instance.
         api_token (str): The API token for authentication.
+        auth_email (str): The email address for Basic Auth.
         board_ids (list[int]): List of Jira board IDs to check.
 
     Returns:
@@ -203,7 +210,7 @@ def get_active_sprints(base_url, api_token, board_ids):
     for board in boards_to_check:
         try:
             sprint_api_path = f"/rest/agile/1.0/board/{board['id']}/sprint?state=active"
-            sprint_response = jira_query(base_url, sprint_api_path, api_token)
+            sprint_response = jira_query(base_url, sprint_api_path, api_token, auth_email)
             sprint_response.raise_for_status()
             sprints = sprint_response.json().get("values", [])
             for sprint in sprints:
@@ -218,14 +225,15 @@ def get_active_sprints(base_url, api_token, board_ids):
     return active_sprint_ids
 
 
-def get_user_issues_in_sprints(base_url, api_token, usernames, sprint_ids):
+def get_user_issues_in_sprints(base_url, api_token, auth_email, usernames, sprint_ids):
     """
     Search for issues assigned to one or more users within a list of sprints.
 
     Args:
         base_url (str): The base URL of the Jira instance.
         api_token (str): The API token for authentication.
-        usernames (list[str]): List of Jira Account IDs or usernames.
+        auth_email (str): The email address for Basic Auth.
+        usernames (list[str]): List of Jira Account IDs or email addresses.
         sprint_ids (list[int]): A list of sprint IDs to search within.
 
     Returns:
@@ -258,6 +266,7 @@ def get_user_issues_in_sprints(base_url, api_token, usernames, sprint_ids):
             base_url,
             search_api_path,
             api_token,
+            auth_email,
             method=requests.post,
             json_payload=payload,
         )
@@ -268,8 +277,8 @@ def get_user_issues_in_sprints(base_url, api_token, usernames, sprint_ids):
             assignee = issue["fields"].get("assignee")
             if assignee:
                 issue["_jasper_assignee"] = (
-                    assignee.get("name")
-                    or assignee.get("displayName")
+                    assignee.get("displayName")
+                    or assignee.get("emailAddress")
                     or assignee.get("accountId", "")
                 )
             else:
@@ -282,13 +291,14 @@ def get_user_issues_in_sprints(base_url, api_token, usernames, sprint_ids):
         return []
 
 
-def add_comment_to_issue(base_url, api_token, issue_key, comment_body):
+def add_comment_to_issue(base_url, api_token, auth_email, issue_key, comment_body):
     """
-    Add a plain text comment to a Jira issue (compatible with Jira Data Center).
+    Add a plain text comment to a Jira issue.
 
     Args:
         base_url (str): The base URL of the Jira instance.
         api_token (str): The API token for authentication.
+        auth_email (str): The email address for Basic Auth.
         issue_key (str): The key of the issue to comment on (e.g., "PROJ-123").
         comment_body (str): The text of the comment to add.
 
@@ -304,6 +314,7 @@ def add_comment_to_issue(base_url, api_token, issue_key, comment_body):
             base_url,
             comment_api_path,
             api_token,
+            auth_email,
             method=requests.post,
             json_payload=payload,
         )
@@ -318,13 +329,14 @@ def add_comment_to_issue(base_url, api_token, issue_key, comment_body):
     return False
 
 
-def get_last_issue_comment(base_url, api_token, issue_key):
+def get_last_issue_comment(base_url, api_token, auth_email, issue_key):
     """
     Get the most recent comment for a Jira issue.
 
     Args:
         base_url (str): The base URL of the Jira instance.
         api_token (str): The API token for authentication.
+        auth_email (str): The email address for Basic Auth.
         issue_key (str): The key of the issue.
 
     Returns:
@@ -334,7 +346,7 @@ def get_last_issue_comment(base_url, api_token, issue_key):
         f"/rest/api/2/issue/{issue_key}/comment?orderBy=-created&maxResults=1"
     )
     try:
-        comments_response = jira_query(base_url, comments_api_path, api_token)
+        comments_response = jira_query(base_url, comments_api_path, api_token, auth_email)
         if comments_response:
             comments_response.raise_for_status()
             comments = comments_response.json().get("comments", [])
@@ -345,13 +357,14 @@ def get_last_issue_comment(base_url, api_token, issue_key):
     return None
 
 
-def get_issue_transitions(base_url, api_token, issue_key):
+def get_issue_transitions(base_url, api_token, auth_email, issue_key):
     """
     Get available status transitions for a Jira issue.
 
     Args:
         base_url (str): The base URL of the Jira instance.
         api_token (str): The API token for authentication.
+        auth_email (str): The email address for Basic Auth.
         issue_key (str): The key of the issue.
 
     Returns:
@@ -364,6 +377,7 @@ def get_issue_transitions(base_url, api_token, issue_key):
             base_url,
             transitions_api_path,
             api_token,
+            auth_email,
         )
         transitions_response.raise_for_status()
         return transitions_response.json().get("transitions", [])
@@ -372,13 +386,14 @@ def get_issue_transitions(base_url, api_token, issue_key):
         return []
 
 
-def set_issue_transition(base_url, api_token, issue_key, transition_id):
+def set_issue_transition(base_url, api_token, auth_email, issue_key, transition_id):
     """
     Change the status of a Jira issue by posting a transition ID.
 
     Args:
         base_url (str): The base URL of the Jira instance.
         api_token (str): The API token for authentication.
+        auth_email (str): The email address for Basic Auth.
         issue_key (str): The key of the issue.
         transition_id (str): The ID of the desired status transition.
 
@@ -393,6 +408,7 @@ def set_issue_transition(base_url, api_token, issue_key, transition_id):
             base_url,
             transitions_api_path,
             api_token,
+            auth_email,
             method=requests.post,
             json_payload=payload,
         )
@@ -426,7 +442,7 @@ def display_issues(issues: List[Dict[str, Any]]):
         status = fields["status"]["name"]
         priority_name = fields.get("priority", {}).get("name", "N/A")
         assignee = issue.get(
-            "_jasper_assignee", fields.get("assignee", {}).get("name", "")
+            "_jasper_assignee", fields.get("assignee", {}).get("displayName", "")
         )
         base_url = ""
         if "self" in issue:
@@ -565,7 +581,7 @@ def load_config(config_path: Optional[str]) -> Tuple[Dict[str, Any], str]:
         raise
 
 
-def get_api_token_with_auth_check(service_name, keyring_user, jira_url):
+def get_api_token_with_auth_check(service_name, keyring_user, jira_url, auth_email):
     """
     Prompt for API token if needed and check authentication before proceeding.
 
@@ -573,6 +589,7 @@ def get_api_token_with_auth_check(service_name, keyring_user, jira_url):
         service_name (str): The unique name for the service storing the password.
         keyring_user (str): The key used for storing/retrieving the token.
         jira_url (str): The Jira instance URL, used for the token hint.
+        auth_email (str): The email address for Basic Auth.
 
     Returns:
         str: The retrieved or entered API token.
@@ -601,20 +618,11 @@ def get_api_token_with_auth_check(service_name, keyring_user, jira_url):
         if not token:
             if first_prompt:
                 logger.warning("API token not found in storage.")
-                if jira_url:
-                    base = jira_url.rstrip("/")
-                    tip_url = (
-                        f"{base}"
-                        "/secure/ViewProfile.jspa"
-                        "?selectedTab=com.atlassian.pats.pats-plugin:"
-                        "jira-user-personal-access-tokens"
-                    )
-                else:
-                    tip_url = (
-                        "https://id.atlassian.com/manage-profile/security/api-tokens"
-                    )
+                tip_url = (
+                    "https://id.atlassian.com/manage-profile/security/api-tokens"
+                )
                 print(
-                    "Tip: You can generate a Jira API token for this instance at: "
+                    "Tip: You can generate a Jira Cloud API Token at: "
                     f"{tip_url}"
                 )
                 first_prompt = False
@@ -625,7 +633,7 @@ def get_api_token_with_auth_check(service_name, keyring_user, jira_url):
                 raise
 
         # Check authentication
-        if check_jira_auth(jira_url, token):
+        if check_jira_auth(jira_url, token, auth_email):
             logger.info("API authentication successful.")
             return token
         if from_keyring:
@@ -721,6 +729,12 @@ def main():
         help="One or more Jira usernames/account IDs to query for assigned issues.",
     )
     parser.add_argument(
+        "--auth-email",
+        dest="auth_email",
+        default=None,
+        help="Your Atlassian account email address (used for API authentication).",
+    )
+    parser.add_argument(
         "--board-ids",
         nargs="+",
         type=int,
@@ -785,12 +799,18 @@ def main():
     except Exception as e:
         # Log the configuration loading error before exiting.
         logger.critical(f"Failed to initialize: {e}")
+        if type(e).__name__ == "FileNotFoundError":
+            print(
+                "It looks like you have tried to run JASPER without a configuration file. "
+                "It is recommended that you create this file at ~/jasper_config.yaml or ./jasper_config.yaml."
+            )
         sys.exit(1)
     if config is None:
         config = {}
 
     # Prioritize command-line args over config file values.
     jira_url = args.jira_url or config.get("jira_url")
+    auth_email = args.auth_email or config.get("auth_email")
 
     # Create a unique service name for keyring based on the Jira URL.
     service_name = f"jasper_script:{jira_url.rstrip('/')}"
@@ -824,6 +844,8 @@ def main():
     missing = []
     if not jira_url:
         missing.append("'jira_url'")
+    if not auth_email:
+        missing.append("'auth_email'")
     if not usernames:
         missing.append("'usernames'")
     if not board_ids:
@@ -840,7 +862,7 @@ def main():
 
     # Authenticate with Jira and get the API token.
     try:
-        api_token = get_api_token_with_auth_check(service_name, keyring_user, jira_url)
+        api_token = get_api_token_with_auth_check(service_name, keyring_user, jira_url, auth_email)
     except Exception as e:
         logger.critical(f"Failed to authenticate with Jira: {e}")
         print(
@@ -862,14 +884,14 @@ def main():
     comment_entry = args.comment_entry or config.get("comment_entry", "stdin")
 
     # Fetch initial data: active sprints and issues.
-    active_sprints = get_active_sprints(jira_url, api_token, board_ids=board_ids)
+    active_sprints = get_active_sprints(jira_url, api_token, auth_email, board_ids=board_ids)
     if not active_sprints:
         logger.error("No active sprints found or an error occurred. Exiting.")
         sys.exit(2)
     logger.info(f"Found {len(active_sprints)} active sprints.")
 
     # Query issues for all specified usernames and combine results
-    issues = get_user_issues_in_sprints(jira_url, api_token, usernames, active_sprints)
+    issues = get_user_issues_in_sprints(jira_url, api_token, auth_email, usernames, active_sprints)
     if not issues:
         print(
             f"\nNo active sprint items found for users: {', '.join(usernames)}."
@@ -889,7 +911,7 @@ def main():
             if choice.lower() in ("r", "refresh"):
                 logger.info("Refreshing issue list...")
                 issues = get_user_issues_in_sprints(
-                    jira_url, api_token, usernames, active_sprints
+                    jira_url, api_token, auth_email, usernames, active_sprints
                 )
                 if not issues:
                     print(
@@ -908,6 +930,7 @@ def main():
                 issues[issue_index],
                 jira_url,
                 api_token,
+                auth_email,
                 jasper_attribution,
                 comment_entry
             )
@@ -924,6 +947,7 @@ def process_issue_actions(
     issue: Dict[str, Any],
     jira_url: str,
     api_token: str,
+    auth_email: str,
     jasper_attribution: bool,
     comment_entry: str
 ):
@@ -957,13 +981,13 @@ def process_issue_actions(
                             "\n\nComment added via JASPER: "
                             "https://github.com/redhat-performance/JASPER"
                         )
-                    if add_comment_to_issue(jira_url, api_token, issue_key, comment):
+                    if add_comment_to_issue(jira_url, api_token, auth_email, issue_key, comment):
                         print("\nComment added successfully.")
             except Exception as e:
                 logger.error("Failed to get comment: %s", e)
         elif action in ("l", "last"):
             print("\nFetching last comment...")
-            last_comment = get_last_issue_comment(jira_url, api_token, issue_key)
+            last_comment = get_last_issue_comment(jira_url, api_token, auth_email, issue_key)
             if last_comment:
                 author = last_comment["author"]["displayName"]
                 created_raw = last_comment["created"]
@@ -978,7 +1002,7 @@ def process_issue_actions(
                 print("No comments found for this issue.")
         elif action in ("s", "status"):
             new_status = process_status_update(
-                issue_key, jira_url, api_token, current_status
+                issue_key, jira_url, api_token, auth_email, current_status
             )
             if new_status:
                 current_status = new_status
@@ -987,7 +1011,7 @@ def process_issue_actions(
 
 
 def process_status_update(
-    issue_key: str, jira_url: str, api_token: str, current_status: str
+    issue_key: str, jira_url: str, api_token: str, auth_email: str, current_status: str
 ) -> Optional[str]:
     """
     Handle the logic for updating an issue's status.
@@ -995,7 +1019,7 @@ def process_status_update(
     Returns the final status name when the user exits this menu.
     """
     print("Getting available statuses...")
-    transitions = get_issue_transitions(jira_url, api_token, issue_key)
+    transitions = get_issue_transitions(jira_url, api_token, auth_email, issue_key)
     if not transitions:
         logger.warning("No available status transitions for this issue.")
         return current_status
@@ -1028,11 +1052,11 @@ def process_status_update(
             if 0 <= trans_index < len(transitions_sorted):
                 selected_transition = transitions_sorted[trans_index]
                 transition_id = selected_transition["id"]
-                if set_issue_transition(jira_url, api_token, issue_key, transition_id):
+                if set_issue_transition(jira_url, api_token, auth_email, issue_key, transition_id):
                     print("Status updated.\n")
                     current_status = selected_transition["name"]
                     print("Getting updated available statuses...")
-                    transitions = get_issue_transitions(jira_url, api_token, issue_key)
+                    transitions = get_issue_transitions(jira_url, api_token, auth_email, issue_key)
                     if not transitions:
                         logger.warning(
                             "No further transitions available from this status."

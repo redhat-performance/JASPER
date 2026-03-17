@@ -51,17 +51,19 @@ Create a `jasper_config.yaml` file in your current directory or in your user hom
 directory (or you can specify a file location with `--config`). Example:
 
 ```yaml
-# Your full Jira instance URL
+# Your full Jira Cloud instance URL
 jira_url: "https://your-company.atlassian.net"
 
-# One or more Jira usernames/account IDs to query for assigned issues
+# Your Atlassian account email (used for API authentication)
+auth_email: "your.email@example.com"
+
+# One or more Jira email addresses or account IDs to query for assigned issues
 usernames:
-  - "user1"
-  - "user2"
+  - "your.email@example.com"
 
 # A list of board IDs to search within.
 # To find board IDs: In Jira, open your board in the browser. The board ID is the
-# number in the URL after "rapidView=" (e.g., ...RapidBoard.jspa?rapidView=42).
+# number in the URL (e.g., ...rapidView=42 or .../board/42).
 board_ids:
   - 10
   - 25
@@ -79,20 +81,20 @@ comment_entry: stdin   # or 'editor' to use your $EDITOR for comment entry
 
 ### Finding Your Jira Information
 
-- **Jira Username or Account ID (`usernames`)**:
-    - For Jira Data Center, this is typically your Jira login username (not necessarily 
-      your email).
-    - You can find your username by clicking your profile/avatar in the top right and
-      selecting "Profile" or "Profile and Visibility."
-    - Your username is often shown in the URL or in your profile details.
-    - If unsure, ask your Jira administrator or check the "Assigned to" field on an
-      issue you are assigned to.
+- **Atlassian Account Email (`auth_email`)**:
+    - This is the email address associated with your Atlassian account.
+    - It is used together with your API token for authentication.
+
+- **Jira User Identity (`usernames`)**:
+    - For Jira Cloud, use your email address or Atlassian account ID.
+    - To find your account ID, go to your Atlassian profile page — the account ID
+      appears in the URL (e.g., `https://your-company.atlassian.net/jira/people/{accountId}`).
+    - You can also use your email address if your Jira instance allows it.
 
 - **Jira Board ID (`board_ids`)**:
     - Navigate to the Jira board you are interested in.
-    - The URL will be similar to
-      `https://your-jira.example.com/secure/RapidBoard.jspa?rapidView={BOARD_ID}`.
-    - The `BOARD_ID` is the number after `rapidView=` in the URL.
+    - The URL will contain the board ID (e.g., `.../board/{BOARD_ID}`
+      or `...?rapidView={BOARD_ID}`).
     - If unsure, ask your Jira administrator or check the board settings in Jira.
 
 ---
@@ -101,8 +103,9 @@ comment_entry: stdin   # or 'editor' to use your $EDITOR for comment entry
 
 - `--config`: Path to the YAML config file (default: `jasper_config.yaml`)
 - `--jira-url`: Your Jira instance URL (overrides config)
-- `--usernames`: One or more Jira usernames/account IDs to query for assigned issues
-  (overrides config)
+- `--auth-email`: Your Atlassian account email for API authentication (overrides config)
+- `--usernames`: One or more Jira email addresses or account IDs to query for assigned
+  issues (overrides config)
 - `--board-ids`: Space-separated list of Jira board IDs to check (overrides config)
 - `--set-token`: Store the Jira API token securely in the system's keyring and exit
 - `--no-jasper-attribution`: Do not add JASPER attribution to comments (overrides config)
@@ -114,9 +117,13 @@ comment_entry: stdin   # or 'editor' to use your $EDITOR for comment entry
 
 ## Authentication & API Token Storage
 
-JASPER uses a Jira API token for authentication. The token is stored securely using
-your system keyring. The keyring entry is scoped to your Jira instance and a fixed key
-("jasper"), so only one token per Jira instance is stored.
+JASPER uses a Jira Cloud API token for authentication via Basic Auth (email + API
+token). The token is stored securely using your system keyring. The keyring entry is
+scoped to your Jira instance and a fixed key ("jasper"), so only one token per Jira
+instance is stored.
+
+You must also provide your Atlassian account email via the `auth_email` config field
+or the `--auth-email` CLI argument.
 
 You can add your Jira API token to the keyring securely once, and it will be available
 for all future runs of JASPER.
@@ -130,11 +137,9 @@ jasper --set-token
 - You will also be asked if you want to store the token in your keyring for future use.
 
 > [!NOTE]
-> To create a Jira API token, go to your Jira Data Center profile and look for
-> "Personal Access Tokens" under your profile or account settings.  
-> For example, visit:  
-> `https://your-jira.example.com/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens`  
-> If you do not see this option, contact your Jira administrator.
+> To create a Jira Cloud API token, visit:
+> `https://id.atlassian.com/manage-profile/security/api-tokens`
+> Log in with your Atlassian account and create a new API token.
 
 ---
 
@@ -233,8 +238,8 @@ Comment added successfully.
 ```
 
 > [!NOTE]
-> Jira Data Center comments do **not** support Markdown or HTML formatting via the REST
-> API. Links and formatting will appear as plain text.
+> Comments are submitted as plain text via the REST API v2. Markdown or HTML formatting
+> will appear as plain text.
 
 Selecting **change (s)tatus** will present a list of available statuses to choose from
 and will highlight the current status with an `*`.
