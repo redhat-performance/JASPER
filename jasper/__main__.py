@@ -84,6 +84,25 @@ class ColoredFormatter(logging.Formatter):
 # --- Jira API Functions ---
 
 
+def extract_text_from_adf(adf_body):
+    """Extract plain text from an Atlassian Document Format (ADF) body."""
+    if isinstance(adf_body, str):
+        return adf_body
+    parts = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("type") == "text":
+                parts.append(node.get("text", ""))
+            elif node.get("type") == "hardBreak":
+                parts.append("\n")
+            for child in node.get("content", []):
+                walk(child)
+
+    walk(adf_body)
+    return "".join(parts)
+
+
 def jira_query(
     base_url,
     api_path,
@@ -99,7 +118,7 @@ def jira_query(
 
     Args:
         base_url (str): The base URL of the Jira instance.
-        api_path (str): The API path for the query (e.g., "/rest/api/2/search").
+        api_path (str): The API path for the query (e.g., "/rest/api/3/search").
         api_token (str): The API token for authentication.
         auth_email (str): The email address for Basic Auth.
         method (function): The HTTP requests() method to use (default is requests.get).
@@ -126,7 +145,10 @@ def jira_query(
     while attempt < max_retries:
         try:
             response = http_method(
-                query_url, headers=headers, data=json.dumps(json_payload), timeout=30
+                query_url,
+                headers=headers,
+                data=json.dumps(json_payload) if json_payload else None,
+                timeout=30,
             )
             if response.status_code == 429:
                 retry_after = int(response.headers.get("Retry-After", retry_delay))
@@ -163,7 +185,7 @@ def check_jira_auth(base_url, api_token, auth_email):
     Returns:
         bool: True if authentication is successful, False otherwise.
     """
-    test_api_path = "/rest/api/2/myself"
+    test_api_path = "/rest/api/3/myself"
     try:
         test_response = jira_query(
             base_url,
@@ -171,9 +193,9 @@ def check_jira_auth(base_url, api_token, auth_email):
             api_token,
             auth_email,
         )
-        if test_response and test_response.status_code == 200:
+        if test_response is not None and test_response.status_code == 200:
             return True
-        if test_response:
+        if test_response is not None:
             logger.warning(
                 f"Authentication failed: {test_response.status_code} "
                 f"{test_response.reason}"
@@ -242,7 +264,7 @@ def get_user_issues_in_sprints(base_url, api_token, auth_email, usernames, sprin
     if not sprint_ids or not usernames:
         return []
 
-    search_api_path = "/rest/api/2/search"
+    search_api_path = "/rest/api/3/search/jql"
     sprint_id_string = ", ".join(map(str, sprint_ids))
     # Build JQL for multiple users
     if len(usernames) == 1:
@@ -305,8 +327,19 @@ def add_comment_to_issue(base_url, api_token, auth_email, issue_key, comment_bod
     Returns:
         bool: True if the comment was added successfully, False otherwise.
     """
-    comment_api_path = f"/rest/api/2/issue/{issue_key}/comment"
-    payload = {"body": comment_body}
+    comment_api_path = f"/rest/api/3/issue/{issue_key}/comment"
+    payload = {
+        "body": {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": comment_body}],
+                }
+            ],
+        }
+    }
     logger.info(f"Adding comment to issue {issue_key}...")
 
     try:
@@ -343,7 +376,7 @@ def get_last_issue_comment(base_url, api_token, auth_email, issue_key):
         dict or None: The last comment dictionary, or None if no comments exist.
     """
     comments_api_path = (
-        f"/rest/api/2/issue/{issue_key}/comment?orderBy=-created&maxResults=1"
+        f"/rest/api/3/issue/{issue_key}/comment?orderBy=-created&maxResults=1"
     )
     try:
         comments_response = jira_query(base_url, comments_api_path, api_token, auth_email)
@@ -370,7 +403,7 @@ def get_issue_transitions(base_url, api_token, auth_email, issue_key):
     Returns:
         list[dict]: A list of available transition dictionaries.
     """
-    transitions_api_path = f"/rest/api/2/issue/{issue_key}/transitions"
+    transitions_api_path = f"/rest/api/3/issue/{issue_key}/transitions"
 
     try:
         transitions_response = jira_query(
@@ -400,7 +433,7 @@ def set_issue_transition(base_url, api_token, auth_email, issue_key, transition_
     Returns:
         bool: True if successful, False otherwise.
     """
-    transitions_api_path = f"/rest/api/2/issue/{issue_key}/transitions"
+    transitions_api_path = f"/rest/api/3/issue/{issue_key}/transitions"
     payload = {"transition": {"id": transition_id}}
 
     try:
@@ -992,7 +1025,7 @@ def process_issue_actions(
                 author = last_comment["author"]["displayName"]
                 created_raw = last_comment["created"]
                 created = created_raw.split("T")[0]
-                body = last_comment["body"]
+                body = extract_text_from_adf(last_comment["body"])
                 print("-" * 50)
                 print(f"Author: {author} ({created})")
                 print("-" * 50)
