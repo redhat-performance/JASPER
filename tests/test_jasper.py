@@ -11,6 +11,7 @@ License: Apache License, Version 2.0
 """
 
 import asyncio
+import base64
 import io
 import json
 import logging
@@ -36,6 +37,7 @@ class TestJasperMain(unittest.TestCase):
         """
         self.fake_jira_url = "https://jira.example.com"
         self.fake_api_token = "fake-token"
+        self.fake_auth_email = "user@example.com"
         self.fake_board_ids = [1, 2]
         self.fake_issue_key = "PROJ-123"
         self.mock_issue_list = [
@@ -46,9 +48,13 @@ class TestJasperMain(unittest.TestCase):
                     "summary": "This is a test issue.",
                     "status": {"name": "In Progress"},
                     "priority": {"name": "High"},
-                    "assignee": {"name": "example_user"},
+                    "assignee": {
+                        "displayName": "Example User",
+                        "emailAddress": "example_user@example.com",
+                        "accountId": "abc123",
+                    },
                 },
-                "_jasper_assignee": "example_user",
+                "_jasper_assignee": "Example User",
             }
         ]
 
@@ -63,7 +69,7 @@ class TestJasperMain(unittest.TestCase):
         mock_resp.json.return_value = {"values": [{"id": 42, "name": "Sprint 42"}]}
         mock_get.return_value = mock_resp
         sprints = jasper_main.get_active_sprints(
-            self.fake_jira_url, self.fake_api_token, self.fake_board_ids
+            self.fake_jira_url, self.fake_api_token, self.fake_auth_email, self.fake_board_ids
         )
         self.assertEqual(sprints, [42])
 
@@ -83,7 +89,7 @@ class TestJasperMain(unittest.TestCase):
         # Provide enough responses for each board in fake_board_ids
         mock_get.side_effect = [resp_429, resp_200, resp_429, resp_200]
         sprints = jasper_main.get_active_sprints(
-            self.fake_jira_url, self.fake_api_token, self.fake_board_ids
+            self.fake_jira_url, self.fake_api_token, self.fake_auth_email, self.fake_board_ids
         )
         self.assertEqual(sprints, [99])
 
@@ -98,7 +104,7 @@ class TestJasperMain(unittest.TestCase):
         mock_resp.json.return_value = {}
         mock_get.return_value = mock_resp
         sprints = jasper_main.get_active_sprints(
-            self.fake_jira_url, self.fake_api_token, self.fake_board_ids
+            self.fake_jira_url, self.fake_api_token, self.fake_auth_email, self.fake_board_ids
         )
         self.assertEqual(sprints, [])
 
@@ -112,7 +118,7 @@ class TestJasperMain(unittest.TestCase):
         mock_resp.raise_for_status.side_effect = requests.exceptions.HTTPError()
         mock_post.return_value = mock_resp
         result = jasper_main.add_comment_to_issue(
-            self.fake_jira_url, self.fake_api_token, self.fake_issue_key, "fail comment"
+            self.fake_jira_url, self.fake_api_token, self.fake_auth_email, self.fake_issue_key, "fail comment"
         )
         self.assertFalse(result)
 
@@ -124,7 +130,7 @@ class TestJasperMain(unittest.TestCase):
         mock_resp.status_code = 400
         mock_post.return_value = mock_resp
         result = jasper_main.set_issue_transition(
-            self.fake_jira_url, self.fake_api_token, self.fake_issue_key, "1"
+            self.fake_jira_url, self.fake_api_token, self.fake_auth_email, self.fake_issue_key, "1"
         )
         self.assertFalse(result)
 
@@ -137,7 +143,7 @@ class TestJasperMain(unittest.TestCase):
         mock_resp.json.return_value = {}
         mock_get.return_value = mock_resp
         transitions = jasper_main.get_issue_transitions(
-            self.fake_jira_url, self.fake_api_token, self.fake_issue_key
+            self.fake_jira_url, self.fake_api_token, self.fake_auth_email, self.fake_issue_key
         )
         self.assertEqual(transitions, [])
 
@@ -173,7 +179,7 @@ class TestJasperMain(unittest.TestCase):
         mock_jira_query.return_value = mock_resp
 
         comment = jasper_main.get_last_issue_comment(
-            self.fake_jira_url, self.fake_api_token, self.fake_issue_key
+            self.fake_jira_url, self.fake_api_token, self.fake_auth_email, self.fake_issue_key
         )
         self.assertIsNotNone(comment)
         self.assertEqual(comment["body"], "a comment")
@@ -187,7 +193,7 @@ class TestJasperMain(unittest.TestCase):
         mock_jira_query.return_value = mock_resp
 
         comment = jasper_main.get_last_issue_comment(
-            self.fake_jira_url, self.fake_api_token, self.fake_issue_key
+            self.fake_jira_url, self.fake_api_token, self.fake_auth_email, self.fake_issue_key
         )
         self.assertIsNone(comment)
 
@@ -220,7 +226,7 @@ class TestJasperMain(unittest.TestCase):
         mock_resp.status_code = 201
         mock_post.return_value = mock_resp
         result = jasper_main.add_comment_to_issue(
-            self.fake_jira_url, self.fake_api_token, self.fake_issue_key, "test comment"
+            self.fake_jira_url, self.fake_api_token, self.fake_auth_email, self.fake_issue_key, "test comment"
         )
         self.assertTrue(result)
 
@@ -235,7 +241,7 @@ class TestJasperMain(unittest.TestCase):
         mock_resp.json.return_value = {"transitions": [{"id": "1", "name": "Done"}]}
         mock_get.return_value = mock_resp
         transitions = jasper_main.get_issue_transitions(
-            self.fake_jira_url, self.fake_api_token, self.fake_issue_key
+            self.fake_jira_url, self.fake_api_token, self.fake_auth_email, self.fake_issue_key
         )
         self.assertEqual(transitions, [{"id": "1", "name": "Done"}])
 
@@ -249,7 +255,7 @@ class TestJasperMain(unittest.TestCase):
         mock_resp.status_code = 204
         mock_post.return_value = mock_resp
         result = jasper_main.set_issue_transition(
-            self.fake_jira_url, self.fake_api_token, self.fake_issue_key, "1"
+            self.fake_jira_url, self.fake_api_token, self.fake_auth_email, self.fake_issue_key, "1"
         )
         self.assertTrue(result)
 
@@ -263,7 +269,7 @@ class TestJasperMain(unittest.TestCase):
         mock_resp.status_code = 200
         mock_get.return_value = mock_resp
         self.assertTrue(
-            jasper_main.check_jira_auth(self.fake_jira_url, self.fake_api_token)
+            jasper_main.check_jira_auth(self.fake_jira_url, self.fake_api_token, self.fake_auth_email)
         )
 
     @patch("jasper.__main__.keyring")
@@ -277,7 +283,7 @@ class TestJasperMain(unittest.TestCase):
         mock_resp.reason = "Unauthorized"
         mock_get.return_value = mock_resp
         self.assertFalse(
-            jasper_main.check_jira_auth(self.fake_jira_url, self.fake_api_token)
+            jasper_main.check_jira_auth(self.fake_jira_url, self.fake_api_token, self.fake_auth_email)
         )
 
     @patch("jasper.__main__.keyring")
@@ -308,7 +314,7 @@ class TestJasperMain(unittest.TestCase):
         mock_post.return_value = mock_resp
 
         jasper_main.get_user_issues_in_sprints(
-            self.fake_jira_url, self.fake_api_token, ["user1", "user2"], [100]
+            self.fake_jira_url, self.fake_api_token, self.fake_auth_email, ["user1", "user2"], [100]
         )
 
         mock_post.assert_called_once()
@@ -328,19 +334,50 @@ class TestJasperMain(unittest.TestCase):
             "issues": [
                 {
                     "key": "PROJ-1",
-                    "fields": {"summary": "Test issue", "assignee": {"name": "user1"}},
+                    "fields": {
+                        "summary": "Test issue",
+                        "assignee": {
+                            "displayName": "User One",
+                            "emailAddress": "user1@example.com",
+                            "accountId": "acc1",
+                        },
+                    },
                 }
             ]
         }
         mock_post.return_value = mock_resp
 
         issues = jasper_main.get_user_issues_in_sprints(
-            self.fake_jira_url, self.fake_api_token, ["user1"], [100]
+            self.fake_jira_url, self.fake_api_token, self.fake_auth_email, ["user1"], [100]
         )
 
         self.assertEqual(len(issues), 1)
         sent_payload = json.loads(mock_post.call_args.kwargs["data"])
         self.assertIn('assignee = "user1"', sent_payload["jql"])
+
+    # --- Basic Auth Header Test ---
+
+    @patch("jasper.__main__.keyring")
+    @patch("jasper.__main__.requests.get")
+    def test_basic_auth_header_construction(self, mock_get, _):
+        """Test that jira_query constructs a correct Basic Auth header."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_get.return_value = mock_resp
+
+        jasper_main.jira_query(
+            self.fake_jira_url,
+            "/rest/api/2/myself",
+            self.fake_api_token,
+            self.fake_auth_email,
+        )
+
+        expected_credentials = base64.b64encode(
+            f"{self.fake_auth_email}:{self.fake_api_token}".encode()
+        ).decode()
+        call_args = mock_get.call_args
+        headers = call_args.kwargs["headers"]
+        self.assertEqual(headers["Authorization"], f"Basic {expected_credentials}")
 
     # --- main() Function Tests ---
 
@@ -365,6 +402,7 @@ class TestJasperMain(unittest.TestCase):
         mock_args.return_value = MagicMock(
             config="c.yaml",
             jira_url=None,
+            auth_email=None,
             usernames=None,
             board_ids=None,
             set_token=False,
@@ -374,6 +412,7 @@ class TestJasperMain(unittest.TestCase):
         mock_config.return_value = (
             {
                 "jira_url": self.fake_jira_url,
+                "auth_email": self.fake_auth_email,
                 "usernames": ["example_user"],
                 "board_ids": self.fake_board_ids,
             },
@@ -410,6 +449,7 @@ class TestJasperMain(unittest.TestCase):
         mock_args.return_value = MagicMock(
             config="c.yaml",
             jira_url=None,
+            auth_email=None,
             usernames=None,
             board_ids=None,
             set_token=False,
@@ -419,6 +459,7 @@ class TestJasperMain(unittest.TestCase):
         mock_config.return_value = (
             {
                 "jira_url": self.fake_jira_url,
+                "auth_email": self.fake_auth_email,
                 "usernames": ["example_user"],
                 "board_ids": self.fake_board_ids,
             },
@@ -461,6 +502,7 @@ class TestJasperMain(unittest.TestCase):
         mock_args.return_value = MagicMock(
             config="c.yaml",
             jira_url=None,
+            auth_email=None,
             usernames=None,
             board_ids=None,
             set_token=False,
@@ -470,6 +512,7 @@ class TestJasperMain(unittest.TestCase):
         mock_config.return_value = (
             {
                 "jira_url": self.fake_jira_url,
+                "auth_email": self.fake_auth_email,
                 "usernames": ["example_user"],
                 "board_ids": self.fake_board_ids,
             },
@@ -481,7 +524,7 @@ class TestJasperMain(unittest.TestCase):
 
         mock_add_comment.assert_called()
         # Check that attribution was added to the comment body
-        self.assertIn("JASPER", mock_add_comment.call_args[0][3])
+        self.assertIn("JASPER", mock_add_comment.call_args[0][4])
 
     @patch("argparse.ArgumentParser.parse_args")
     @patch(
@@ -540,6 +583,7 @@ class TestJasperMain(unittest.TestCase):
         mock_args.return_value = MagicMock(
             config="c.yaml",
             jira_url=None,
+            auth_email=None,
             usernames=None,
             board_ids=None,
             set_token=False,
@@ -549,6 +593,7 @@ class TestJasperMain(unittest.TestCase):
         mock_config.return_value = (
             {
                 "jira_url": self.fake_jira_url,
+                "auth_email": self.fake_auth_email,
                 "usernames": ["dblack"],
                 "board_ids": self.fake_board_ids,
             },
@@ -566,10 +611,10 @@ class TestJasperMain(unittest.TestCase):
         self.assertEqual(cm.exception.code, 0)
 
         mock_get_transitions.assert_called_with(
-            self.fake_jira_url, "fake-token", "PROJ-123"
+            self.fake_jira_url, "fake-token", self.fake_auth_email, "PROJ-123"
         )
         mock_set_transition.assert_called_with(
-            self.fake_jira_url, "fake-token", "PROJ-123", "24"
+            self.fake_jira_url, "fake-token", self.fake_auth_email, "PROJ-123", "24"
         )
         # Verify that our mocked sys.exit was called with the correct code.
         mock_exit.assert_called_with(0)
@@ -597,6 +642,7 @@ class TestJasperMain(unittest.TestCase):
         mock_args.return_value = MagicMock(
             config="c.yaml",
             jira_url=None,
+            auth_email=None,
             usernames=None,
             board_ids=None,
             set_token=False,
@@ -606,6 +652,7 @@ class TestJasperMain(unittest.TestCase):
         mock_config.return_value = (
             {
                 "jira_url": self.fake_jira_url,
+                "auth_email": self.fake_auth_email,
                 "usernames": ["example_user"],
                 "board_ids": self.fake_board_ids,
             },
@@ -644,6 +691,7 @@ class TestJasperMain(unittest.TestCase):
         mock_args.return_value = MagicMock(
             config=None,
             jira_url="https://jira.example.com",
+            auth_email=None,
             set_token=True,
             verbose=0,
             usernames=None,
@@ -687,7 +735,7 @@ class TestJasperMain(unittest.TestCase):
         self, mock_logger, mock_getpass, mock_input, mock_check_auth, mock_keyring_get
     ):
         """Test the flow when the keyring backend is not available."""
-        jasper_main.get_api_token_with_auth_check("service", "user", self.fake_jira_url)
+        jasper_main.get_api_token_with_auth_check("service", "user", self.fake_jira_url, self.fake_auth_email)
         mock_logger.warning.assert_any_call(
             "`keyring` backend not found."
             "For secure storage, please install a backend "
@@ -703,7 +751,7 @@ class TestJasperMain(unittest.TestCase):
     ):
         """Test entering an invalid token followed by a valid one."""
         token = jasper_main.get_api_token_with_auth_check(
-            "service", "user", self.fake_jira_url
+            "service", "user", self.fake_jira_url, self.fake_auth_email
         )
         self.assertEqual(token, "valid-token")
         self.assertEqual(mock_getpass.call_count, 2)
@@ -784,7 +832,12 @@ class TestJasperMain(unittest.TestCase):
         """Test that -v and -vv flags correctly set the logging level."""
         # Common mocks for a minimal run
         mock_config.return_value = (
-            {"jira_url": self.fake_jira_url, "usernames": ["user"], "board_ids": [1]},
+            {
+                "jira_url": self.fake_jira_url,
+                "auth_email": self.fake_auth_email,
+                "usernames": ["user"],
+                "board_ids": [1],
+            },
             "c.yaml",
         )
         # We expect SystemExit because the program will exit when no sprints are found.
@@ -801,6 +854,7 @@ class TestJasperMain(unittest.TestCase):
                 mock_args.return_value = MagicMock(
                     config=None,
                     jira_url=None,
+                    auth_email=None,
                     usernames=None,
                     board_ids=None,
                     set_token=False,
@@ -814,6 +868,48 @@ class TestJasperMain(unittest.TestCase):
 
                 # Check the level of the global logger instance
                 self.assertEqual(jasper_main.logger.level, expected_level)
+
+    # --- Missing auth_email validation test ---
+
+    @patch("argparse.ArgumentParser.parse_args")
+    @patch("jasper.__main__.load_config")
+    @patch("jasper.__main__.logger")
+    @patch("sys.exit")
+    def test_main_missing_auth_email(
+        self, mock_exit, mock_logger, mock_config, mock_args
+    ):
+        """Test main exits with error when auth_email is missing."""
+        mock_exit.side_effect = SystemExit(1)
+
+        mock_args.return_value = MagicMock(
+            config="c.yaml",
+            jira_url=None,
+            auth_email=None,
+            usernames=None,
+            board_ids=None,
+            set_token=False,
+            no_jasper_attribution=False,
+            verbose=0,
+        )
+        mock_config.return_value = (
+            {
+                "jira_url": self.fake_jira_url,
+                "usernames": ["user"],
+                "board_ids": [1],
+            },
+            "c.yaml",
+        )
+
+        with self.assertRaises(SystemExit) as cm:
+            jasper_main.main()
+
+        self.assertEqual(cm.exception.code, 1)
+        # Verify that the missing auth_email was reported
+        critical_calls = [str(c) for c in mock_logger.critical.call_args_list]
+        self.assertTrue(
+            any("auth_email" in c for c in critical_calls),
+            f"Expected 'auth_email' in critical log calls, got: {critical_calls}"
+        )
 
 
 if __name__ == "__main__":
